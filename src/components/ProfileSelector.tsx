@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types';
 import { Plus, HelpCircle, Lock, Loader2 } from 'lucide-react';
-import { db } from '../lib/firebase';
-import { collection, query, getDocs, addDoc, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
 
 const DEFAULT_PROFILES: Omit<UserProfile, 'id'>[] = [
@@ -33,54 +31,42 @@ export default function ProfileSelector({ userId, onSelect }: ProfileSelectorPro
   const [isAdding, setIsAdding] = useState(false);
   const [newProfileName, setNewProfileName] = useState('');
 
-  // Sync Profiles from Firestore
+  // Sync Profiles from localStorage
   useEffect(() => {
-    if (!userId) return;
-
-    const colRef = collection(db, 'users', userId, 'profiles');
-    
-    const unsubscribe = onSnapshot(colRef, async (snapshot) => {
-      if (snapshot.empty) {
-        // First login, auto-provision default profiles in Firestore
-        setIsLoading(true);
-        try {
-          const promises = DEFAULT_PROFILES.map(p => addDoc(colRef, p));
-          await Promise.all(promises);
-        } catch (err) {
-          console.error('Error auto-seeding profiles:', err);
-        }
-      } else {
-        const loaded: UserProfile[] = [];
-        snapshot.forEach((doc) => {
-          loaded.push({ id: doc.id, ...doc.data() } as UserProfile);
-        });
-        setProfiles(loaded);
-        setIsLoading(false);
-      }
-    });
-
-    return () => unsubscribe();
+    const saved = localStorage.getItem(`profiles_${userId || 'default'}`);
+    if (saved) {
+      setProfiles(JSON.parse(saved));
+    } else {
+      // Seed default profiles
+      const seeded: UserProfile[] = DEFAULT_PROFILES.map((p, index) => ({
+        id: `profile-${index}-${Date.now()}`,
+        ...p
+      }));
+      localStorage.setItem(`profiles_${userId || 'default'}`, JSON.stringify(seeded));
+      setProfiles(seeded);
+    }
+    setIsLoading(false);
   }, [userId]);
 
-  const handleAddProfile = async (e: React.FormEvent) => {
+  const handleAddProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProfileName.trim() || !userId) return;
+    if (!newProfileName.trim()) return;
 
-    try {
-      const randomAvatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
-      const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+    const randomAvatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
+    const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)];
 
-      await addDoc(collection(db, 'users', userId, 'profiles'), {
-        name: newProfileName.trim(),
-        avatar: randomAvatar,
-        color: randomColor,
-      });
+    const newProfile: UserProfile = {
+      id: `profile-${Date.now()}`,
+      name: newProfileName.trim(),
+      avatar: randomAvatar,
+      color: randomColor,
+    };
 
-      setNewProfileName('');
-      setIsAdding(false);
-    } catch (err) {
-      console.error('Error adding profile:', err);
-    }
+    const updated = [...profiles, newProfile];
+    localStorage.setItem(`profiles_${userId || 'default'}`, JSON.stringify(updated));
+    setProfiles(updated);
+    setNewProfileName('');
+    setIsAdding(false);
   };
 
   if (isLoading) {
@@ -206,3 +192,4 @@ export default function ProfileSelector({ userId, onSelect }: ProfileSelectorPro
     </div>
   );
 }
+

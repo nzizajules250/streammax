@@ -1,10 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Movie, UserProfile, UserSubscription, InAppNotification } from './types';
-import { db } from './lib/firebase';
-import { useUser, useAuth } from '@clerk/clerk-react';
-import { 
-  collection, query, where, onSnapshot, doc, getDoc, updateDoc, addDoc, limit, orderBy
-} from 'firebase/firestore';
 import { MOVIES } from './data/movies';
 import AuthScreen from './components/AuthScreen';
 import ProfileSelector from './components/ProfileSelector';
@@ -26,6 +21,27 @@ const GUEST_PROFILE: UserProfile = {
   color: 'zinc',
 };
 
+const DEFAULT_NOTIFICATIONS: InAppNotification[] = [
+  {
+    id: 'notif_welcome',
+    title: 'Welcome to Netflix Studio!',
+    message: 'Unlock personalized profiles, custom subtitle accent colors, and 4K cinema feeds.',
+    userId: 'all',
+    timestamp: Date.now() - 60000 * 5, // 5 min ago
+    isRead: false,
+    type: 'release',
+  },
+  {
+    id: 'notif_recs',
+    title: 'Workspace Critiques Live',
+    message: 'Head over to any movie details to join the workspace review stream and post critiques.',
+    userId: 'all',
+    timestamp: Date.now() - 3600000, // 1 hour ago
+    isRead: false,
+    type: 'release',
+  }
+];
+
 export default function App() {
   // 1. Payment Simulator Intercept
   const isSimulatorPath = window.location.pathname === '/payment-simulator';
@@ -33,22 +49,15 @@ export default function App() {
     return <PaymentSimulator />;
   }
 
-  // 2. Clerk Authentication hooks & Mapping
-  const { user, isLoaded } = useUser();
-  const { signOut: clerkSignOut, getToken } = useAuth();
-
-  const authUser = user ? {
-    uid: user.id,
-    email: user.primaryEmailAddress?.emailAddress || '',
-    displayName: user.fullName || user.firstName || user.primaryEmailAddress?.emailAddress?.split('@')[0] || 'User',
-  } : null;
-
-  const authLoading = !isLoaded;
-
-  // 2.5 Force auth screen state
+  // 2. Client-side Authentication state
+  const [authUser, setAuthUser] = useState<{ uid: string; email: string; displayName: string } | null>(() => {
+    const saved = localStorage.getItem('netflix_auth_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [authLoading, setAuthLoading] = useState(false);
   const [forceAuthScreen, setForceAuthScreen] = useState(false);
 
-  // 3. Active Profile
+  // 3. Active Profile state
   const [activeProfile, setActiveProfile] = useState<UserProfile | null>(() => {
     const saved = localStorage.getItem('netflix_active_profile');
     return saved ? JSON.parse(saved) : null;
@@ -60,13 +69,12 @@ export default function App() {
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [blockedMovieToWatch, setBlockedMovieToWatch] = useState<Movie | null>(null);
 
-  // 5. Watchlist & History
+  // 5. Watchlist & History state
   const [watchlistMovieIds, setWatchlistMovieIds] = useState<string[]>([]);
-  const [historyMovieIds, setHistoryMovieIds] = useState<string[]>([]);
   const [continueWatchingMovies, setContinueWatchingMovies] = useState<{ movie: Movie; progress: number }[]>([]);
   const [isContentLoading, setIsContentLoading] = useState(true);
 
-  // 6. In-App Peer Sharing Recommendations
+  // 6. In-App Peer Sharing Recommendations state
   const [recommendations, setRecommendations] = useState<any[]>([]);
 
   // 7. Notifications State
@@ -86,7 +94,7 @@ export default function App() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [showToast, setShowToast] = useState<string | null>(null);
 
-  // Detect URL share referrals (e.g. /?watch=m2)
+  // Detect URL share referrals (e.g. /?watch=m2) & Payment redirects
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const watchId = urlParams.get('watch');
@@ -108,19 +116,18 @@ export default function App() {
     }
   }, []);
 
-  // Sync Auth session (handled via Clerk useUser hook directly)
-
-  // Sync Subscription status
+  // Sync Subscription state
   useEffect(() => {
     if (!authUser) {
       setSubscription(null);
       return;
     }
 
-    const docRef = doc(db, 'subscriptions', authUser.uid);
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
+    const syncSub = () => {
+      const subKey = `subscription_${authUser.uid}`;
+      const saved = localStorage.getItem(subKey);
+      if (saved) {
+        const data = JSON.parse(saved);
         setSubscription({
           isPremium: data.isPremium && data.expiresAt > Date.now(),
           txRef: data.txRef,
@@ -131,74 +138,73 @@ export default function App() {
       } else {
         setSubscription(null);
       }
-    });
+    };
 
-    return () => unsubscribe();
+    syncSub();
+    const interval = setInterval(syncSub, 1500);
+    return () => clearInterval(interval);
   }, [authUser]);
 
-  // Sync Watchlist from Firestore
+  // Sync Watchlist from LocalStorage
   useEffect(() => {
     if (!activeProfile) {
       setWatchlistMovieIds([]);
       return;
     }
 
-    const q = query(
-      collection(db, 'watchlist'),
-      where('profileId', '==', activeProfile.id)
-    );
+    const syncWatchlist = () => {
+      const key = `watchlist_${activeProfile.id}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        setWatchlistMovieIds(JSON.parse(saved) as string[]);
+      } else {
+        setWatchlistMovieIds([]);
+      }
+    };
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ids: string[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.movieId) {
-          ids.push(data.movieId);
-        }
-      });
-      setWatchlistMovieIds(ids);
-    });
-
-    return () => unsubscribe();
+    syncWatchlist();
+    const interval = setInterval(syncWatchlist, 1000);
+    return () => clearInterval(interval);
   }, [activeProfile]);
 
-  // Sync Continue Watching from progress Firestore collection
+  // Sync Continue Watching progress from LocalStorage
   useEffect(() => {
     if (!activeProfile) {
       setContinueWatchingMovies([]);
       return;
     }
 
-    const q = query(
-      collection(db, 'progress'),
-      where('profileId', '==', activeProfile.id)
-    );
+    const syncProgress = () => {
+      const key = `progress_${activeProfile.id}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const progressList = JSON.parse(saved) as { movieId: string; progress: number; updatedAt: number }[];
+        const list: { movie: Movie; progress: number; updatedAt: number }[] = [];
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: { movie: Movie; progress: number; updatedAt: number }[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const progressVal = data.progress || 0;
-        // Partially watched is typically between 1% and 95%
-        if (progressVal > 0 && progressVal < 95) {
-          const matchedMovie = MOVIES.find(m => m.id === data.movieId);
-          if (matchedMovie) {
-            list.push({
-              movie: matchedMovie,
-              progress: progressVal,
-              updatedAt: data.updatedAt || 0
-            });
+        progressList.forEach((item) => {
+          const progressVal = item.progress || 0;
+          if (progressVal > 0 && progressVal < 95) {
+            const matchedMovie = MOVIES.find(m => m.id === item.movieId);
+            if (matchedMovie) {
+              list.push({
+                movie: matchedMovie,
+                progress: progressVal,
+                updatedAt: item.updatedAt || 0
+              });
+            }
           }
-        }
-      });
-      // Sort in-memory to avoid missing-index error on compound query with filter/sort
-      list.sort((a, b) => b.updatedAt - a.updatedAt);
-      setContinueWatchingMovies(list.map(item => ({ movie: item.movie, progress: item.progress })));
-    }, (error) => {
-      console.error("Error fetching progress collection:", error);
-    });
+        });
 
-    return () => unsubscribe();
+        list.sort((a, b) => b.updatedAt - a.updatedAt);
+        setContinueWatchingMovies(list.map(item => ({ movie: item.movie, progress: item.progress })));
+      } else {
+        setContinueWatchingMovies([]);
+      }
+    };
+
+    syncProgress();
+    const interval = setInterval(syncProgress, 1000);
+    return () => clearInterval(interval);
   }, [activeProfile]);
 
   // Handle skeleton loading timer on mount and profile switch
@@ -210,52 +216,44 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [activeProfile]);
 
-  // Sync Peer-to-Peer Recommendations from Firestore
+  // Sync Peer Recommendations from LocalStorage
   useEffect(() => {
     if (!activeProfile) {
       setRecommendations([]);
       return;
     }
 
-    const q = query(
-      collection(db, 'recommendations'),
-      where('toProfileId', '==', activeProfile.id)
-    );
+    const syncRecommendations = () => {
+      const key = `recommendations_${activeProfile.id}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        setRecommendations(JSON.parse(saved));
+      } else {
+        setRecommendations([]);
+      }
+    };
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const loaded: any[] = [];
-      snapshot.forEach((docSnap) => {
-        loaded.push({ id: docSnap.id, ...docSnap.data() });
-      });
-      setRecommendations(loaded);
-    });
-
-    return () => unsubscribe();
+    syncRecommendations();
+    const interval = setInterval(syncRecommendations, 1500);
+    return () => clearInterval(interval);
   }, [activeProfile]);
 
-  // Sync In-App real-time Notifications from Firestore
+  // Sync Notifications from LocalStorage
   useEffect(() => {
-    if (!authUser) {
-      setNotifications([]);
-      return;
-    }
+    const key = `notifications_${authUser?.uid || 'guest'}`;
+    const syncNotifs = () => {
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        setNotifications(JSON.parse(saved));
+      } else {
+        localStorage.setItem(key, JSON.stringify(DEFAULT_NOTIFICATIONS));
+        setNotifications(DEFAULT_NOTIFICATIONS);
+      }
+    };
 
-    const q = query(
-      collection(db, 'notifications'),
-      where('userId', 'in', [authUser.uid, 'all']),
-      orderBy('timestamp', 'desc'),
-      limit(10)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const loaded: InAppNotification[] = [];
-      snapshot.forEach((docSnap) => {
-        loaded.push({ id: docSnap.id, ...docSnap.data() } as InAppNotification);
-      });
-      setNotifications(loaded);
-    });
-
-    return () => unsubscribe();
+    syncNotifs();
+    const interval = setInterval(syncNotifs, 2000);
+    return () => clearInterval(interval);
   }, [authUser]);
 
   // Sync offline downloads list
@@ -270,7 +268,6 @@ export default function App() {
     };
 
     syncDownloads();
-    // Watch for detail modal download toggles using storage event or intervals
     const interval = setInterval(syncDownloads, 2000);
     return () => clearInterval(interval);
   }, [activeProfile, selectedMovie]);
@@ -295,43 +292,26 @@ export default function App() {
     setIsProfileMenuOpen(false);
   };
 
-  const handleSignOutUser = async () => {
-    await clerkSignOut();
+  const handleSignOutUser = () => {
+    localStorage.removeItem('netflix_auth_user');
+    setAuthUser(null);
     handleLogoutProfile();
   };
 
-  const handleInitiateCheckout = async () => {
+  const handleInitiateCheckout = () => {
     if (!authUser) return;
     setIsCheckoutLoading(true);
 
-    try {
-      const token = await getToken();
-      const response = await fetch('/api/payments/initialize', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : ''
-        },
-        body: JSON.stringify({
-          email: authUser.email,
-          uid: authUser.uid,
-          name: authUser.displayName || authUser.email?.split('@')[0],
-          profileId: activeProfile?.id || 'default'
-        }),
-      });
-
-      const data = await response.json();
-      if (data.success && data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
-      } else {
-        throw new Error(data.error || 'Failed to initialize checkout gateway.');
-      }
-    } catch (err: any) {
-      console.error(err);
-      setShowToast('❌ Checkout initialization failed.');
-    } finally {
+    setTimeout(() => {
+      const txRef = `sim_tx_${Date.now()}`;
+      const email = encodeURIComponent(authUser.email);
+      const uid = encodeURIComponent(authUser.uid);
+      const name = encodeURIComponent(authUser.displayName || '');
+      
+      // Redirect to sandbox payment simulator directly
+      window.location.href = `/payment-simulator?tx_ref=${txRef}&email=${email}&uid=${uid}&name=${name}`;
       setIsCheckoutLoading(false);
-    }
+    }, 800);
   };
 
   const handleAuthRequired = () => {
@@ -339,8 +319,6 @@ export default function App() {
   };
 
   const handlePlayMovieTrigger = (movie: Movie) => {
-    // Premium condition: If offline mode is active OR if user is premium, play instantly!
-    // Else, prompt subscription checkout but allow trailer playback
     const isSubscribed = subscription?.isPremium === true;
     if (isOfflineMode || isSubscribed) {
       setPlayingMovie(movie);
@@ -350,12 +328,11 @@ export default function App() {
     }
   };
 
-  const markNotificationRead = async (id: string) => {
-    try {
-      await updateDoc(doc(db, 'notifications', id), { isRead: true });
-    } catch (err) {
-      console.error('Error marking notification read:', err);
-    }
+  const markNotificationRead = (id: string) => {
+    const key = `notifications_${authUser?.uid || 'guest'}`;
+    const updated = notifications.map(n => n.id === id ? { ...n, isRead: true } : n);
+    localStorage.setItem(key, JSON.stringify(updated));
+    setNotifications(updated);
   };
 
   // Movie collections filter
@@ -398,7 +375,7 @@ export default function App() {
 
   // Auth Guard & Force Auth
   if (forceAuthScreen && !authUser) {
-    return <AuthScreen onClose={() => setForceAuthScreen(false)} />;
+    return <AuthScreen onClose={() => setForceAuthScreen(false)} onLoginSuccess={(u) => setAuthUser(u)} />;
   }
 
   // Profile Selection Guard (only applies to authenticated users)
@@ -569,7 +546,7 @@ export default function App() {
               My List
             </button>
             <button className="hover:text-neutral-400 transition-colors cursor-pointer flex items-center gap-1">
-              <Sparkles className="h-3.5 w-3.5 text-red-500" />
+              <Sparkles className="h-3.5 w-3.5 text-red-500 animate-pulse" />
               <span>Recommendations</span>
             </button>
           </nav>
@@ -588,7 +565,7 @@ export default function App() {
             }`}
             title="Toggle Offline mode"
           >
-            {isOfflineMode ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+            {isOfflineMode ? <Wifi className="w-3.5 h-3.5 text-amber-500" /> : <WifiOff className="w-3.5 h-3.5" />}
             <span className="hidden sm:inline">{isOfflineMode ? 'Online' : 'Offline'}</span>
           </button>
 
@@ -771,7 +748,7 @@ export default function App() {
                         referrerPolicy="no-referrer"
                       />
                       <span className="absolute top-2 right-2 bg-red-600 text-[9px] font-bold px-1.5 py-0.5 rounded font-mono">
-                        {movie.ageRating}
+                        {movie.rating}
                       </span>
                     </div>
 
@@ -815,7 +792,7 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  {/* Continue Watching row pulling from 'progress' Firestore collection */}
+                  {/* Continue Watching row pulling from LocalStorage watch progress */}
                   {continueWatchingMovies.length > 0 && (
                     <MovieRow
                       title="Continue Watching"
@@ -841,7 +818,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* My List synced to Firestore */}
+                  {/* My List synced to LocalStorage */}
                   <div id="my-list-section">
                     <MovieRow
                       title="My List"
@@ -906,7 +883,7 @@ export default function App() {
           <a href="#" className="hover:underline">Terms of Use</a>
           <a href="#" className="hover:underline">Privacy Statement</a>
         </div>
-        <div className="font-semibold text-neutral-400 uppercase">REAL-TIME MULTI-PROFILE ENGINE SYNCHRONIZED SECURELY BY FIRESTORE</div>
+        <div className="font-semibold text-neutral-400 uppercase">REAL-TIME MULTI-PROFILE ENGINE SYNCHRONIZED SECURELY BY BROWSER STORAGE</div>
         <div className="text-[10px] text-neutral-600">© {new Date().getFullYear()} Netflix Web Clone Premium Edition • Built with Antigravity Workspace</div>
       </footer>
     </div>

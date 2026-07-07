@@ -1,18 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Movie, UserProfile, ReviewDoc } from '../types';
-import { db } from '../lib/firebase';
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  onSnapshot, 
-  addDoc, 
-  deleteDoc, 
-  getDocs,
-  doc,
-  updateDoc
-} from 'firebase/firestore';
 import { MOVIES } from '../data/movies';
 import { Play, Plus, Check, Heart, X, Send, Trash2, Star, Calendar, Clock, Smile, Share2, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -25,6 +12,14 @@ interface MovieDetailModalProps {
   onPlay: (movie: Movie) => void;
   onAuthRequired?: () => void;
 }
+
+const DEFAULT_CRITIQUES: Record<string, string[]> = {
+  default: [
+    "Absolutely breathtaking cinematography! This is a modern masterpiece.",
+    "The character development kept me on the edge of my seat. Highly recommend!",
+    "Decent watch, but the pacing felt a bit rushed towards the final act.",
+  ]
+};
 
 export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAuthRequired }: MovieDetailModalProps) {
   const [inList, setInList] = useState(false);
@@ -71,17 +66,19 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
       setInList(false);
       return;
     }
-    const q = query(
-      collection(db, 'watchlist'),
-      where('profileId', '==', profile.id),
-      where('movieId', '==', movie.id)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setInList(!snapshot.empty);
-    });
-
-    return () => unsubscribe();
+    const syncWatchlist = () => {
+      const key = `watchlist_${profile.id}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const list = JSON.parse(saved) as string[];
+        setInList(list.includes(movie.id));
+      } else {
+        setInList(false);
+      }
+    };
+    syncWatchlist();
+    const interval = setInterval(syncWatchlist, 1000);
+    return () => clearInterval(interval);
   }, [profile.id, movie.id]);
 
   // Sync Ratings like status
@@ -90,18 +87,19 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
       setIsLiked(false);
       return;
     }
-    const q = query(
-      collection(db, 'ratings'),
-      where('profileId', '==', profile.id),
-      where('movieId', '==', movie.id),
-      where('value', '==', 'like')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setIsLiked(!snapshot.empty);
-    });
-
-    return () => unsubscribe();
+    const syncLiked = () => {
+      const key = `ratings_${profile.id}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const list = JSON.parse(saved) as string[];
+        setIsLiked(list.includes(movie.id));
+      } else {
+        setIsLiked(false);
+      }
+    };
+    syncLiked();
+    const interval = setInterval(syncLiked, 1000);
+    return () => clearInterval(interval);
   }, [profile.id, movie.id]);
 
   // Sync Star Rating status
@@ -110,49 +108,50 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
       setUserRating(0);
       return;
     }
-    const q = query(
-      collection(db, 'ratings'),
-      where('profileId', '==', profile.id),
-      where('movieId', '==', movie.id)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      let ratingVal = 0;
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.rating !== undefined) {
-          ratingVal = data.rating;
-        }
-      });
-      setUserRating(ratingVal);
-    });
-
-    return () => unsubscribe();
+    const syncStarRating = () => {
+      const key = `star_ratings_${profile.id}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const ratingsMap = JSON.parse(saved) as Record<string, number>;
+        setUserRating(ratingsMap[movie.id] || 0);
+      } else {
+        setUserRating(0);
+      }
+    };
+    syncStarRating();
+    const interval = setInterval(syncStarRating, 1000);
+    return () => clearInterval(interval);
   }, [profile.id, movie.id]);
 
-  // Sync Reviews thread real-time
+  // Sync Reviews thread
   useEffect(() => {
-    const q = query(
-      collection(db, 'reviews'),
-      where('movieId', '==', movie.id),
-      orderBy('timestamp', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const reviewList: ReviewDoc[] = [];
-      snapshot.forEach((doc) => {
-        reviewList.push({ id: doc.id, ...doc.data() } as ReviewDoc);
-      });
-      setReviews(reviewList);
-    }, (error) => {
-      console.error('Error fetching reviews:', error);
-    });
-
-    return () => unsubscribe();
+    const syncReviews = () => {
+      const key = `reviews_${movie.id}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        setReviews(JSON.parse(saved) as ReviewDoc[]);
+      } else {
+        // Prepopulate with elegant mock comments
+        const seeded: ReviewDoc[] = (DEFAULT_CRITIQUES[movie.id] || DEFAULT_CRITIQUES.default).map((c, idx) => ({
+          id: `seed_${idx}`,
+          profileId: `seed_user_${idx}`,
+          profileName: ["Nolan Fanatic", "Jules Codeur", "Cinema Geek"][idx % 3],
+          profileAvatar: ["🎬", "🍿", "⭐️"][idx % 3],
+          movieId: movie.id,
+          content: c,
+          timestamp: Date.now() - (idx * 3600000 * 4) // spaced by hours
+        }));
+        localStorage.setItem(key, JSON.stringify(seeded));
+        setReviews(seeded);
+      }
+    };
+    syncReviews();
+    const interval = setInterval(syncReviews, 2000);
+    return () => clearInterval(interval);
   }, [movie.id]);
 
-  // Add review to Firestore
-  const handleAddReview = async (e: React.FormEvent) => {
+  // Add review to LocalStorage
+  const handleAddReview = (e: React.FormEvent) => {
     e.preventDefault();
     if (profile.id === 'guest') {
       if (onAuthRequired) onAuthRequired();
@@ -162,14 +161,23 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
     setSubmittingReview(true);
 
     try {
-      await addDoc(collection(db, 'reviews'), {
+      const key = `reviews_${movie.id}`;
+      const saved = localStorage.getItem(key);
+      const currentReviews = saved ? (JSON.parse(saved) as ReviewDoc[]) : [];
+
+      const newReview: ReviewDoc = {
+        id: `rev_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         profileId: profile.id,
         profileName: profile.name,
         profileAvatar: profile.avatar,
         movieId: movie.id,
         content: commentInput.trim(),
         timestamp: Date.now()
-      });
+      };
+
+      const updated = [newReview, ...currentReviews];
+      localStorage.setItem(key, JSON.stringify(updated));
+      setReviews(updated);
       setCommentInput('');
     } catch (err) {
       console.error('Error saving review:', err);
@@ -178,125 +186,88 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
     }
   };
 
-  // Delete own review
-  const handleDeleteReview = async (reviewId: string) => {
+  // Delete review from LocalStorage
+  const handleDeleteReview = (reviewId: string) => {
     if (profile.id === 'guest') {
       if (onAuthRequired) onAuthRequired();
       return;
     }
     if (!window.confirm("Are you sure you want to delete your comment?")) return;
     try {
-      await deleteDoc(doc(db, 'reviews', reviewId));
+      const key = `reviews_${movie.id}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const currentReviews = JSON.parse(saved) as ReviewDoc[];
+        const updated = currentReviews.filter(r => r.id !== reviewId);
+        localStorage.setItem(key, JSON.stringify(updated));
+        setReviews(updated);
+      }
     } catch (err) {
       console.error('Error deleting review:', err);
     }
   };
 
-  const confirmRemoveList = async () => {
-    try {
-      const q = query(
-        collection(db, 'watchlist'),
-        where('profileId', '==', profile.id),
-        where('movieId', '==', movie.id)
-      );
-      const snapshot = await getDocs(q);
-      const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
-    } catch (err) {
-      console.error('Error removing from watchlist:', err);
+  const confirmRemoveList = () => {
+    const key = `watchlist_${profile.id}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      const list = JSON.parse(saved) as string[];
+      const updated = list.filter(id => id !== movie.id);
+      localStorage.setItem(key, JSON.stringify(updated));
+      setInList(false);
+    }
+    setShowRemoveConfirm(false);
+  };
+
+  const handleToggleList = () => {
+    if (profile.id === 'guest') {
+      if (onAuthRequired) onAuthRequired();
+      return;
+    }
+    const key = `watchlist_${profile.id}`;
+    const saved = localStorage.getItem(key);
+    const list = saved ? (JSON.parse(saved) as string[]) : [];
+
+    if (!list.includes(movie.id)) {
+      list.push(movie.id);
+      localStorage.setItem(key, JSON.stringify(list));
+      setInList(true);
+    } else {
+      setShowRemoveConfirm(true);
     }
   };
 
-  const handleToggleList = async () => {
+  const handleToggleLike = () => {
+    if (profile.id === 'guest') {
+      if (onAuthRequired) onAuthRequired();
+      return;
+    }
+    const key = `ratings_${profile.id}`;
+    const saved = localStorage.getItem(key);
+    let list = saved ? (JSON.parse(saved) as string[]) : [];
+
+    if (!list.includes(movie.id)) {
+      list.push(movie.id);
+      setIsLiked(true);
+    } else {
+      list = list.filter(id => id !== movie.id);
+      setIsLiked(false);
+    }
+    localStorage.setItem(key, JSON.stringify(list));
+  };
+
+  const handleSaveRating = (ratingVal: number) => {
     if (profile.id === 'guest') {
       if (onAuthRequired) onAuthRequired();
       return;
     }
     try {
-      const q = query(
-        collection(db, 'watchlist'),
-        where('profileId', '==', profile.id),
-        where('movieId', '==', movie.id)
-      );
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        await addDoc(collection(db, 'watchlist'), {
-          profileId: profile.id,
-          movieId: movie.id,
-          addedAt: Date.now()
-        });
-      } else {
-        setShowRemoveConfirm(true);
-      }
-    } catch (err) {
-      console.error('Error toggling list:', err);
-    }
-  };
-
-  const handleToggleLike = async () => {
-    if (profile.id === 'guest') {
-      if (onAuthRequired) onAuthRequired();
-      return;
-    }
-    try {
-      const q = query(
-        collection(db, 'ratings'),
-        where('profileId', '==', profile.id),
-        where('movieId', '==', movie.id),
-        where('value', '==', 'like')
-      );
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        await addDoc(collection(db, 'ratings'), {
-          profileId: profile.id,
-          movieId: movie.id,
-          value: 'like'
-        });
-      } else {
-        const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(deletePromises);
-      }
-    } catch (err) {
-      console.error('Error toggling ratings:', err);
-    }
-  };
-
-  const handleSaveRating = async (ratingVal: number) => {
-    if (profile.id === 'guest') {
-      if (onAuthRequired) onAuthRequired();
-      return;
-    }
-    try {
-      const q = query(
-        collection(db, 'ratings'),
-        where('profileId', '==', profile.id),
-        where('movieId', '==', movie.id)
-      );
-      const snapshot = await getDocs(q);
-
-      let foundDoc = null;
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.rating !== undefined || data.value === undefined) {
-          foundDoc = docSnap;
-        }
-      });
-
-      if (!foundDoc) {
-        await addDoc(collection(db, 'ratings'), {
-          profileId: profile.id,
-          movieId: movie.id,
-          rating: ratingVal,
-          timestamp: Date.now()
-        });
-      } else {
-        await updateDoc(doc(db, 'ratings', (foundDoc as any).id), {
-          rating: ratingVal,
-          timestamp: Date.now()
-        });
-      }
+      const key = `star_ratings_${profile.id}`;
+      const saved = localStorage.getItem(key);
+      const ratingsMap = saved ? JSON.parse(saved) : {};
+      ratingsMap[movie.id] = ratingVal;
+      localStorage.setItem(key, JSON.stringify(ratingsMap));
+      setUserRating(ratingVal);
     } catch (err) {
       console.error('Error saving rating:', err);
     }
@@ -351,7 +322,7 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
                 onClick={() => onPlay(movie)}
                 className="flex items-center gap-1.5 px-5 md:px-7 py-2 bg-white text-black hover:bg-zinc-200 font-bold text-xs md:text-sm rounded-md transition-colors shadow-md cursor-pointer"
               >
-                <Play className="w-3.5 h-3.5 fill-current" />
+                <Play className="w-3.5 h-3.5 fill-current text-black" />
                 <span>Play</span>
               </button>
 
@@ -403,7 +374,6 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
                 <Share2 className="w-4 h-4" />
               </button>
             </div>
-
           </div>
         </div>
 
@@ -416,7 +386,7 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
               <div className="flex items-center gap-3 font-medium text-zinc-300">
                 <span className="text-emerald-400 font-bold text-base">{Math.round(movie.rating * 20)}% Match</span>
                 <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-zinc-400" /> {movie.releaseYear}</span>
-                <span className="border border-zinc-700 px-1.5 py-0.2 text-xs rounded-xs font-semibold">{movie.ageRating}</span>
+                <span className="border border-zinc-700 px-1.5 py-0.2 text-xs rounded-xs font-semibold">{movie.rating}</span>
                 <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-zinc-400" /> {movie.duration}</span>
               </div>
 
@@ -615,8 +585,8 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
             </p>
             <div className="flex gap-3 pt-2">
               <button
-                onClick={async () => {
-                  await confirmRemoveList();
+                onClick={() => {
+                  confirmRemoveList();
                   setShowRemoveConfirm(false);
                 }}
                 className="flex-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-all cursor-pointer"
@@ -634,6 +604,5 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
         </div>
       )}
     </div>
-
   );
 }

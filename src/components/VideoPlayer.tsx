@@ -4,8 +4,6 @@ import {
   ArrowLeft, Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, Maximize2, Minimize2, 
   Settings, Sparkles, Sliders, Monitor, Globe, Check, Eye
 } from 'lucide-react';
-import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, addDoc, updateDoc, setDoc, doc } from 'firebase/firestore';
 
 interface VideoPlayerProps {
   movie: Movie;
@@ -50,53 +48,41 @@ export default function VideoPlayer({ movie, profile, isPremium, onClose, onSubs
   // Load existing watch history progress on start
   useEffect(() => {
     if (profile.id === 'guest') return;
-    async function fetchHistory() {
-      try {
-        // Try 'progress' collection first, then fall back to 'history'
-        const qProg = query(
-          collection(db, 'progress'),
-          where('profileId', '==', profile.id),
-          where('movieId', '==', movie.id)
-        );
-        const snapProg = await getDocs(qProg);
-        let savedProgress = 0;
+    
+    try {
+      const key = `progress_${profile.id}`;
+      const saved = localStorage.getItem(key);
+      let savedProgress = 0;
 
-        if (!snapProg.empty) {
-          savedProgress = snapProg.docs[0].data().progress || 0;
-        } else {
-          const qHist = query(
-            collection(db, 'history'),
-            where('profileId', '==', profile.id),
-            where('movieId', '==', movie.id)
-          );
-          const snapHist = await getDocs(qHist);
-          if (!snapHist.empty) {
-            savedProgress = snapHist.docs[0].data().progress || 0;
-          }
+      if (saved) {
+        const progressList = JSON.parse(saved) as { movieId: string; progress: number }[];
+        const matched = progressList.find(item => item.movieId === movie.id);
+        if (matched) {
+          savedProgress = matched.progress || 0;
         }
-
-        if (videoRef.current && savedProgress > 0 && savedProgress < 98 && !isTrailerMode) {
-          // Wait for metadata to load to apply seek
-          videoRef.current.addEventListener('loadedmetadata', () => {
-            if (videoRef.current) {
-              const targetTime = (savedProgress / 100) * videoRef.current.duration;
-              videoRef.current.currentTime = targetTime;
-              setProgress(savedProgress);
-            }
-          }, { once: true });
-        }
-      } catch (err) {
-        console.error('Error loading history:', err);
       }
+
+      if (videoRef.current && savedProgress > 0 && savedProgress < 98 && !isTrailerMode) {
+        // Wait for metadata to load to apply seek
+        const applySeek = () => {
+          if (videoRef.current) {
+            const targetTime = (savedProgress / 100) * videoRef.current.duration;
+            videoRef.current.currentTime = targetTime;
+            setProgress(savedProgress);
+          }
+        };
+        videoRef.current.addEventListener('loadedmetadata', applySeek, { once: true });
+      }
+    } catch (err) {
+      console.error('Error loading history:', err);
     }
-    fetchHistory();
   }, [profile.id, movie.id, isTrailerMode]);
 
-  // Persist playback progress to Firestore periodically
+  // Persist playback progress to LocalStorage periodically
   useEffect(() => {
     if (isTrailerMode) return; // Do not save history for trailer clips
 
-    const interval = setInterval(async () => {
+    const interval = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
         const currentProgress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
         if (isNaN(currentProgress)) return;
@@ -104,56 +90,23 @@ export default function VideoPlayer({ movie, profile, isPremium, onClose, onSubs
         const calculatedProgress = Math.min(Math.round(currentProgress), 100);
 
         try {
-          // 1. Sync 'history'
-          const q = query(
-            collection(db, 'history'),
-            where('profileId', '==', profile.id),
-            where('movieId', '==', movie.id)
-          );
-          const snapshot = await getDocs(q);
+          const key = `progress_${profile.id}`;
+          const saved = localStorage.getItem(key);
+          let progressList = saved ? (JSON.parse(saved) as { movieId: string; progress: number; updatedAt: number }[]) : [];
 
-          if (snapshot.empty) {
-            await addDoc(collection(db, 'history'), {
-              profileId: profile.id,
-              movieId: movie.id,
-              progress: calculatedProgress,
-              updatedAt: Date.now()
-            });
-          } else {
-            const docId = snapshot.docs[0].id;
-            await updateDoc(doc(db, 'history', docId), {
-              progress: calculatedProgress,
-              updatedAt: Date.now()
-            });
-          }
+          progressList = progressList.filter(item => item.movieId !== movie.id);
+          progressList.push({
+            movieId: movie.id,
+            progress: calculatedProgress,
+            updatedAt: Date.now()
+          });
 
-          // 2. Sync 'progress' for Continue Watching
-          const qProg = query(
-            collection(db, 'progress'),
-            where('profileId', '==', profile.id),
-            where('movieId', '==', movie.id)
-          );
-          const snapProg = await getDocs(qProg);
-
-          if (snapProg.empty) {
-            await addDoc(collection(db, 'progress'), {
-              profileId: profile.id,
-              movieId: movie.id,
-              progress: calculatedProgress,
-              updatedAt: Date.now()
-            });
-          } else {
-            const progDocId = snapProg.docs[0].id;
-            await updateDoc(doc(db, 'progress', progDocId), {
-              progress: calculatedProgress,
-              updatedAt: Date.now()
-            });
-          }
+          localStorage.setItem(key, JSON.stringify(progressList));
         } catch (err) {
           console.error('Error updating progress:', err);
         }
       }
-    }, 5000); // sync every 5 seconds
+    }, 4000); // sync every 4 seconds
 
     return () => clearInterval(interval);
   }, [profile.id, movie.id, isTrailerMode]);
@@ -430,7 +383,7 @@ export default function VideoPlayer({ movie, profile, isPremium, onClose, onSubs
               onClick={handlePlayPause}
               className="p-5 sm:p-6 bg-white/15 hover:bg-white/25 backdrop-blur-md rounded-full text-white cursor-pointer hover:scale-105 transition-all border border-white/20 shadow-2xl"
             >
-              <Play className="w-8 h-8 sm:w-10 sm:h-10 fill-current" />
+              <Play className="w-8 h-8 sm:w-10 sm:h-10 fill-current text-white" />
             </button>
           )}
         </div>

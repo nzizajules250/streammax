@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import { Movie, UserProfile } from '../types';
-import { Copy, Share2, Send, Check, Sparkles, X, Globe, UserCheck } from 'lucide-react';
-import { db } from '../lib/firebase';
-import { collection, addDoc } from 'firebase/firestore';
-import { motion, AnimatePresence } from 'motion/react';
+import { Copy, Share2, Send, Check, Sparkles, X, Globe } from 'lucide-react';
+import { motion } from 'motion/react';
 
 const OTHER_PROFILES: Omit<UserProfile, 'color'>[] = [
   { id: 'u1', name: 'Jules', avatar: '🦊' },
@@ -31,19 +29,28 @@ export default function ShareModal({ movie, activeProfile, onClose }: ShareModal
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleShareWithProfile = async (target: Omit<UserProfile, 'color'>) => {
+  const handleShareWithProfile = (target: Omit<UserProfile, 'color'>) => {
     setSharingProfileId(target.id);
     setShareStatus(null);
 
     try {
-      await addDoc(collection(db, 'recommendations'), {
-        movieId: movie.id,
-        fromProfileId: activeProfile.id,
-        fromProfileName: activeProfile.name,
-        fromProfileAvatar: activeProfile.avatar,
-        toProfileId: target.id,
-        timestamp: Date.now()
-      });
+      const key = `recommendations_${target.id}`;
+      const saved = localStorage.getItem(key);
+      const list = saved ? JSON.parse(saved) : [];
+
+      // Avoid duplicates
+      const exists = list.some((item: any) => item.movieId === movie.id && item.fromProfileId === activeProfile.id);
+      if (!exists) {
+        list.push({
+          id: `rec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          movieId: movie.id,
+          fromProfileId: activeProfile.id,
+          fromProfileName: activeProfile.name,
+          fromProfileAvatar: activeProfile.avatar,
+          timestamp: Date.now()
+        });
+        localStorage.setItem(key, JSON.stringify(list));
+      }
 
       setShareStatus(`Shared successfully with ${target.name}!`);
       setTimeout(() => {
