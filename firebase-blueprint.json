@@ -1,0 +1,106 @@
+{
+  "entities": {
+    "watchlist": {
+      "title": "Watchlist Item",
+      "description": "Items in the user's watchlist",
+      "type": "object",
+      "properties": {
+        "profileId": { "type": "string" },
+        "movieId": { "type": "string" },
+        "addedAt": { "type": "integer" }
+      },
+      "required": ["profileId", "movieId", "addedAt"]
+    },
+    "ratings": {
+      "title": "Ratings and Likes",
+      "description": "Likes and star ratings of movies by profiles",
+      "type": "object",
+      "properties": {
+        "profileId": { "type": "string" },
+        "movieId": { "type": "string" },
+        "value": { "type": "string" },
+        "rating": { "type": "integer" },
+        "timestamp": { "type": "integer" }
+      },
+      "required": ["profileId", "movieId"]
+    },
+    "history": {
+      "title": "Watch History Progress",
+      "description": "Progress of user watching a movie",
+      "type": "object",
+      "properties": {
+        "profileId": { "type": "string" },
+        "movieId": { "type": "string" },
+        "progress": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["profileId", "movieId", "progress", "updatedAt"]
+    },
+    "reviews": {
+      "title": "Movie Review",
+      "description": "Review written by a profile on a movie",
+      "type": "object",
+      "properties": {
+        "profileId": { "type": "string" },
+        "profileName": { "type": "string" },
+        "profileAvatar": { "type": "string" },
+        "movieId": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "integer" }
+      },
+      "required": ["profileId", "profileName", "profileAvatar", "movieId", "content", "timestamp"]
+    },
+    "notifications": {
+      "title": "In-App Notification",
+      "description": "A notification generated for the user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "timestamp": { "type": "integer" }
+      },
+      "required": ["userId", "title", "message", "isRead", "timestamp"]
+    },
+    "subscriptions": {
+      "title": "User Subscription",
+      "description": "Cinematic Premium subscription details",
+      "type": "object",
+      "properties": {
+        "isPremium": { "type": "boolean" },
+        "txRef": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "subscribedAt": { "type": "integer" },
+        "expiresAt": { "type": "integer" }
+      },
+      "required": ["isPremium", "txRef", "transactionId", "subscribedAt", "expiresAt"]
+    }
+  },
+  "firestore": {
+    "watchlist/{itemId}": {
+      "schema": "watchlist",
+      "description": "Items in profiles' watchlists"
+    },
+    "ratings/{ratingId}": {
+      "schema": "ratings",
+      "description": "Star ratings and likes for movies"
+    },
+    "history/{historyId}": {
+      "schema": "history",
+      "description": "Watch progress for profiles"
+    },
+    "reviews/{reviewId}": {
+      "schema": "reviews",
+      "description": "Reviews left on movies"
+    },
+    "notifications/{notifId}": {
+      "schema": "notifications",
+      "description": "In-app announcements and notifications"
+    },
+    "subscriptions/{userId}": {
+      "schema": "subscriptions",
+      "description": "User subscriptions mapped by UID"
+    }
+  }
+}
