@@ -63,6 +63,8 @@ export default function App() {
   // 5. Watchlist & History
   const [watchlistMovieIds, setWatchlistMovieIds] = useState<string[]>([]);
   const [historyMovieIds, setHistoryMovieIds] = useState<string[]>([]);
+  const [continueWatchingMovies, setContinueWatchingMovies] = useState<{ movie: Movie; progress: number }[]>([]);
+  const [isContentLoading, setIsContentLoading] = useState(true);
 
   // 6. In-App Peer Sharing Recommendations
   const [recommendations, setRecommendations] = useState<any[]>([]);
@@ -158,6 +160,54 @@ export default function App() {
     });
 
     return () => unsubscribe();
+  }, [activeProfile]);
+
+  // Sync Continue Watching from progress Firestore collection
+  useEffect(() => {
+    if (!activeProfile) {
+      setContinueWatchingMovies([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'progress'),
+      where('profileId', '==', activeProfile.id)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: { movie: Movie; progress: number; updatedAt: number }[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const progressVal = data.progress || 0;
+        // Partially watched is typically between 1% and 95%
+        if (progressVal > 0 && progressVal < 95) {
+          const matchedMovie = MOVIES.find(m => m.id === data.movieId);
+          if (matchedMovie) {
+            list.push({
+              movie: matchedMovie,
+              progress: progressVal,
+              updatedAt: data.updatedAt || 0
+            });
+          }
+        }
+      });
+      // Sort in-memory to avoid missing-index error on compound query with filter/sort
+      list.sort((a, b) => b.updatedAt - a.updatedAt);
+      setContinueWatchingMovies(list.map(item => ({ movie: item.movie, progress: item.progress })));
+    }, (error) => {
+      console.error("Error fetching progress collection:", error);
+    });
+
+    return () => unsubscribe();
+  }, [activeProfile]);
+
+  // Handle skeleton loading timer on mount and profile switch
+  useEffect(() => {
+    setIsContentLoading(true);
+    const timer = setTimeout(() => {
+      setIsContentLoading(false);
+    }, 1200);
+    return () => clearTimeout(timer);
   }, [activeProfile]);
 
   // Sync Peer-to-Peer Recommendations from Firestore
@@ -484,25 +534,9 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Database/Service Status Status Indicator */}
-      <div className="bg-neutral-950 border-b border-neutral-900 text-[10px] sm:text-xs font-mono px-4 sm:px-12 py-2 flex justify-between items-center tracking-wider text-neutral-400">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Wifi className="h-3.5 w-3.5 text-red-500 animate-pulse" />
-          <span className="hidden sm:inline">SECURE MULTI-PROFILE PIPELINE:</span>
-          <span className="text-emerald-500 font-bold uppercase">
-            {!authUser ? 'PUBLIC PREVIEW ACTIVE • LOGIN TO UNLOCK' : 'FIREBASE AUTH + FIRESTORE ACTIVE'}
-          </span>
-        </div>
-        
-        <div className="flex items-center gap-4 text-neutral-300">
-          <span className="hidden sm:inline">Tier: <strong className="text-amber-500">{subscription?.isPremium ? 'Cinematic Premium ⭐' : !authUser ? 'Free Preview Mode 🍿' : 'Free Demo Tier 🍿'}</strong></span>
-          <span>Profile: <strong className="text-white font-bold">{currentProfile.name} {currentProfile.avatar}</strong></span>
-        </div>
-      </div>
-
       {/* Top Warning Banner for Offline mode */}
       {isOfflineMode && (
-        <div className="bg-amber-500/10 border-b border-amber-500/30 text-center py-2 text-xs font-bold text-amber-500 flex items-center justify-center gap-1.5">
+        <div className="bg-amber-500/10 border-b border-amber-500/30 text-center py-2 text-xs font-bold text-amber-500 flex items-center justify-center gap-1.5 z-50 relative">
           <WifiOff className="w-4 h-4 animate-bounce" />
           <span>⚡ OFFLINE MODE ACTIVE • Showing local downloaded content (Play unrestricted)</span>
         </div>
@@ -510,8 +544,8 @@ export default function App() {
 
       {/* Global Navbar */}
       <header
-        className={`fixed top-10 left-0 right-0 z-40 flex items-center justify-between px-4 md:px-12 py-3 transition-colors duration-500 ${
-          isScrolled ? 'bg-black/95 backdrop-blur-md border-b border-neutral-900' : 'bg-gradient-to-b from-black/80 to-transparent'
+        className={`fixed top-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-6xl rounded-2xl border transition-all duration-300 flex items-center justify-between px-6 py-2.5 backdrop-blur-md ${
+          isScrolled ? 'bg-black/90 border-neutral-800/80 shadow-2xl shadow-black/60' : 'bg-black/50 border-neutral-800/30 shadow-lg'
         }`}
       >
         <div className="flex items-center gap-4 md:gap-8">
@@ -763,79 +797,99 @@ export default function App() {
           /* Default Immersive Catalog Row stack */
           <div className="space-y-12">
             
-            {baseMovies.length > 0 && (
-              <HeroBanner
-                movie={featuredMovie}
-                profile={currentProfile}
-                onPlay={handlePlayMovieTrigger}
-                onOpenDetails={setSelectedMovie}
-                onAuthRequired={handleAuthRequired}
-              />
-            )}
+            <HeroBanner
+              movie={featuredMovie}
+              profile={currentProfile}
+              onPlay={handlePlayMovieTrigger}
+              onOpenDetails={setSelectedMovie}
+              onAuthRequired={handleAuthRequired}
+              isLoading={isContentLoading}
+            />
 
             <div className="space-y-10 -mt-16 sm:-mt-24 md:-mt-32 relative z-10 pb-10">
-              
-              {/* Dynamic Peer recommendation row */}
-              {recommendedMovies.length > 0 && (
-                <div className="bg-gradient-to-r from-red-950/20 via-transparent to-transparent py-4 border-y border-red-500/10">
+              {isContentLoading ? (
+                <>
+                  <MovieRow title="Continue Watching" isLoading={true} />
+                  <MovieRow title="Trending Now" isLoading={true} />
+                  <MovieRow title="Popular on Netflix" isLoading={true} />
+                </>
+              ) : (
+                <>
+                  {/* Continue Watching row pulling from 'progress' Firestore collection */}
+                  {continueWatchingMovies.length > 0 && (
+                    <MovieRow
+                      title="Continue Watching"
+                      movies={continueWatchingMovies.map(item => item.movie)}
+                      profile={currentProfile}
+                      onPlay={handlePlayMovieTrigger}
+                      onOpenDetails={setSelectedMovie}
+                      onAuthRequired={handleAuthRequired}
+                    />
+                  )}
+
+                  {/* Dynamic Peer recommendation row */}
+                  {recommendedMovies.length > 0 && (
+                    <div className="bg-gradient-to-r from-red-950/20 via-transparent to-transparent py-4 border-y border-red-500/10">
+                      <MovieRow
+                        title="Shared with me"
+                        movies={recommendedMovies}
+                        profile={currentProfile}
+                        onPlay={handlePlayMovieTrigger}
+                        onOpenDetails={setSelectedMovie}
+                        onAuthRequired={handleAuthRequired}
+                      />
+                    </div>
+                  )}
+
+                  {/* My List synced to Firestore */}
+                  <div id="my-list-section">
+                    <MovieRow
+                      title="My List"
+                      movies={watchlistMovies}
+                      profile={currentProfile}
+                      onPlay={handlePlayMovieTrigger}
+                      onOpenDetails={setSelectedMovie}
+                      onAuthRequired={handleAuthRequired}
+                    />
+                  </div>
+
                   <MovieRow
-                    title="Shared with me"
-                    movies={recommendedMovies}
+                    title="Trending Now"
+                    movies={trendingMovies}
                     profile={currentProfile}
                     onPlay={handlePlayMovieTrigger}
                     onOpenDetails={setSelectedMovie}
                     onAuthRequired={handleAuthRequired}
                   />
-                </div>
+
+                  <MovieRow
+                    title="Popular on Netflix"
+                    movies={popularMovies}
+                    profile={currentProfile}
+                    onPlay={handlePlayMovieTrigger}
+                    onOpenDetails={setSelectedMovie}
+                    onAuthRequired={handleAuthRequired}
+                  />
+
+                  <MovieRow
+                    title="Sci-Fi & Fantasy Masterpieces"
+                    movies={scifiMovies}
+                    profile={currentProfile}
+                    onPlay={handlePlayMovieTrigger}
+                    onOpenDetails={setSelectedMovie}
+                    onAuthRequired={handleAuthRequired}
+                  />
+
+                  <MovieRow
+                    title="Award-Winning Dramas"
+                    movies={dramaMovies}
+                    profile={currentProfile}
+                    onPlay={handlePlayMovieTrigger}
+                    onOpenDetails={setSelectedMovie}
+                    onAuthRequired={handleAuthRequired}
+                  />
+                </>
               )}
-
-              {/* My List synced to Firestore */}
-              <div id="my-list-section">
-                <MovieRow
-                  title="My List"
-                  movies={watchlistMovies}
-                  profile={currentProfile}
-                  onPlay={handlePlayMovieTrigger}
-                  onOpenDetails={setSelectedMovie}
-                  onAuthRequired={handleAuthRequired}
-                />
-              </div>
-
-              <MovieRow
-                title="Trending Now"
-                movies={trendingMovies}
-                profile={currentProfile}
-                onPlay={handlePlayMovieTrigger}
-                onOpenDetails={setSelectedMovie}
-                onAuthRequired={handleAuthRequired}
-              />
-
-              <MovieRow
-                title="Popular on Netflix"
-                movies={popularMovies}
-                profile={currentProfile}
-                onPlay={handlePlayMovieTrigger}
-                onOpenDetails={setSelectedMovie}
-                onAuthRequired={handleAuthRequired}
-              />
-
-              <MovieRow
-                title="Sci-Fi & Fantasy Masterpieces"
-                movies={scifiMovies}
-                profile={currentProfile}
-                onPlay={handlePlayMovieTrigger}
-                onOpenDetails={setSelectedMovie}
-                onAuthRequired={handleAuthRequired}
-              />
-
-              <MovieRow
-                title="Award-Winning Dramas"
-                movies={dramaMovies}
-                profile={currentProfile}
-                onPlay={handlePlayMovieTrigger}
-                onOpenDetails={setSelectedMovie}
-                onAuthRequired={handleAuthRequired}
-              />
             </div>
           </div>
         )}

@@ -40,22 +40,22 @@ export default function MovieCard({ movie, profile, onPlay, onOpenDetails, onAut
     return () => unsubscribe();
   }, [profile.id, movie.id]);
 
-  // Sync Watch history progress for this specific movie & profile
+  // Sync Watch progress for this specific movie & profile
   useEffect(() => {
     if (profile.id === 'guest') {
       setWatchProgress(null);
       return;
     }
     const q = query(
-      collection(db, 'history'),
+      collection(db, 'progress'),
       where('profileId', '==', profile.id),
       where('movieId', '==', movie.id)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       if (!snapshot.empty) {
-        const histDoc = snapshot.docs[0].data();
-        const p = histDoc.progress || 0;
+        const progDoc = snapshot.docs[0].data();
+        const p = progDoc.progress || 0;
         // Movies started but not finished (e.g., between 1% and 95%)
         if (p > 0 && p < 95) {
           setWatchProgress(p);
@@ -63,7 +63,27 @@ export default function MovieCard({ movie, profile, onPlay, onOpenDetails, onAut
           setWatchProgress(null);
         }
       } else {
-        setWatchProgress(null);
+        // Fallback to older 'history' collection if 'progress' is not found yet
+        const qHist = query(
+          collection(db, 'history'),
+          where('profileId', '==', profile.id),
+          where('movieId', '==', movie.id)
+        );
+        getDocs(qHist).then((snapHist) => {
+          if (!snapHist.empty) {
+            const histDoc = snapHist.docs[0].data();
+            const p = histDoc.progress || 0;
+            if (p > 0 && p < 95) {
+              setWatchProgress(p);
+            } else {
+              setWatchProgress(null);
+            }
+          } else {
+            setWatchProgress(null);
+          }
+        }).catch(() => {
+          setWatchProgress(null);
+        });
       }
     });
 

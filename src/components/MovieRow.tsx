@@ -5,14 +5,23 @@ import MovieCard from './MovieCard';
 
 interface MovieRowProps {
   title: string;
-  movies: Movie[];
-  profile: UserProfile;
-  onPlay: (movie: Movie) => void;
-  onOpenDetails: (movie: Movie) => void;
+  movies?: Movie[];
+  profile?: UserProfile;
+  onPlay?: (movie: Movie) => void;
+  onOpenDetails?: (movie: Movie) => void;
   onAuthRequired?: () => void;
+  isLoading?: boolean;
 }
 
-export default function MovieRow({ title, movies, profile, onPlay, onOpenDetails, onAuthRequired }: MovieRowProps) {
+export default function MovieRow({ 
+  title, 
+  movies = [], 
+  profile, 
+  onPlay, 
+  onOpenDetails, 
+  onAuthRequired,
+  isLoading = false 
+}: MovieRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [showLeftArrow, setShowLeftArrow] = useState(false);
 
@@ -32,6 +41,29 @@ export default function MovieRow({ title, movies, profile, onPlay, onOpenDetails
       setShowLeftArrow(rowRef.current.scrollLeft > 10);
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2 relative">
+        {/* Category Title Skeleton */}
+        <div className="px-4 md:px-12">
+          <div className="h-5 w-40 bg-zinc-800/80 rounded-md animate-pulse" />
+        </div>
+        {/* Horizontally scrolling layout */}
+        <div className="px-4 md:px-12 flex gap-3 overflow-x-hidden py-3">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div 
+              key={i}
+              className="flex-none w-36 sm:w-48 h-56 sm:h-72 rounded-lg bg-zinc-850/50 animate-pulse border border-zinc-800/20 flex flex-col justify-end p-3 space-y-2"
+            >
+              <div className="h-4 w-5/6 bg-zinc-800/80 rounded animate-pulse" />
+              <div className="h-3 w-1/2 bg-zinc-800/50 rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   if (movies.length === 0) return null;
 

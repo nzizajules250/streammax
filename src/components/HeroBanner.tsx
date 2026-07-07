@@ -6,21 +6,22 @@ import { collection, query, where, onSnapshot, addDoc, deleteDoc, getDocs } from
 import { motion } from 'motion/react';
 
 interface HeroBannerProps {
-  movie: Movie;
-  profile: UserProfile;
-  onPlay: (movie: Movie) => void;
-  onOpenDetails: (movie: Movie) => void;
+  movie?: Movie;
+  profile?: UserProfile;
+  onPlay?: (movie: Movie) => void;
+  onOpenDetails?: (movie: Movie) => void;
   onAuthRequired?: () => void;
+  isLoading?: boolean;
 }
 
-export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAuthRequired }: HeroBannerProps) {
+export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAuthRequired, isLoading = false }: HeroBannerProps) {
   const [inList, setInList] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [loadingList, setLoadingList] = useState(true);
 
   // Synchronise watchlist from Firestore
   useEffect(() => {
-    if (profile.id === 'guest') {
+    if (!profile || profile.id === 'guest' || !movie) {
       setInList(false);
       setLoadingList(false);
       return;
@@ -37,10 +38,10 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
     });
 
     return () => unsubscribe();
-  }, [profile.id, movie.id]);
+  }, [profile?.id, movie?.id]);
 
   const handleToggleList = async () => {
-    if (profile.id === 'guest') {
+    if (!profile || profile.id === 'guest' || !movie) {
       if (onAuthRequired) onAuthRequired();
       return;
     }
@@ -69,15 +70,47 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
     }
   };
 
+  if (isLoading || !movie) {
+    return (
+      <div className="relative h-[55vh] md:h-[80vh] w-full overflow-hidden bg-zinc-950 flex flex-col justify-end pb-12 px-4 md:px-12 border-b border-zinc-900/10">
+        {/* Shadow overlays for smooth blending */}
+        <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-zinc-900/10 to-transparent" />
+        <div className="absolute inset-0 bg-zinc-900/25 animate-pulse" />
+        
+        {/* Info elements placeholder */}
+        <div className="relative z-10 max-w-xl space-y-4 animate-pulse">
+          <div className="h-4 w-28 bg-zinc-800/80 rounded-md" />
+          <div className="h-10 md:h-16 w-3/4 bg-zinc-800/80 rounded-lg" />
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-12 bg-zinc-800/80 rounded" />
+            <div className="h-4 w-16 bg-zinc-800/80 rounded" />
+            <div className="h-4 w-10 bg-zinc-800/80 rounded" />
+          </div>
+          <div className="space-y-2 pt-2">
+            <div className="h-4 w-full bg-zinc-800/80 rounded" />
+            <div className="h-4 w-5/6 bg-zinc-800/80 rounded" />
+          </div>
+          <div className="flex items-center gap-3 pt-4">
+            <div className="h-12 w-28 bg-zinc-800 rounded-xl" />
+            <div className="h-12 w-32 bg-zinc-800/60 rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative h-[55vh] md:h-[80vh] w-full overflow-hidden select-none bg-black">
-      {/* Background Backdrop Image with Rich Shadow Vignettes */}
+      {/* Background Backdrop Image/Video with Rich Shadow Vignettes */}
       <div className="absolute inset-0">
-        <img
-          src={movie.backdropUrl}
-          alt={movie.title}
+        <video
+          src={movie.videoUrl}
+          autoPlay
+          loop
+          muted={isMuted}
+          playsInline
           className="w-full h-full object-cover brightness-[0.7] scale-102 transition-all duration-700"
-          referrerPolicy="no-referrer"
+          poster={movie.backdropUrl}
         />
         {/* Shadow overlays for true cinematic blending */}
         <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-black/30 to-black/30" />

@@ -36,6 +36,18 @@
       },
       "required": ["profileId", "movieId", "progress", "updatedAt"]
     },
+    "progress": {
+      "title": "Movie Watch Progress",
+      "description": "Detailed watch progress of a movie per profile for continue watching",
+      "type": "object",
+      "properties": {
+        "profileId": { "type": "string" },
+        "movieId": { "type": "string" },
+        "progress": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["profileId", "movieId", "progress", "updatedAt"]
+    },
     "reviews": {
       "title": "Movie Review",
       "description": "Review written by a profile on a movie",
@@ -89,6 +101,10 @@
     "history/{historyId}": {
       "schema": "history",
       "description": "Watch progress for profiles"
+    },
+    "progress/{progressId}": {
+      "schema": "progress",
+      "description": "Watch progress mapped by unique ID for continue watching"
     },
     "reviews/{reviewId}": {
       "schema": "reviews",

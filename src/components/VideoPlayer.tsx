@@ -52,25 +52,38 @@ export default function VideoPlayer({ movie, profile, isPremium, onClose, onSubs
     if (profile.id === 'guest') return;
     async function fetchHistory() {
       try {
-        const q = query(
-          collection(db, 'history'),
+        // Try 'progress' collection first, then fall back to 'history'
+        const qProg = query(
+          collection(db, 'progress'),
           where('profileId', '==', profile.id),
           where('movieId', '==', movie.id)
         );
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-          const histDoc = snapshot.docs[0].data();
-          const savedProgress = histDoc.progress || 0;
-          if (videoRef.current && savedProgress > 0 && savedProgress < 98 && !isTrailerMode) {
-            // Wait for metadata to load to apply seek
-            videoRef.current.addEventListener('loadedmetadata', () => {
-              if (videoRef.current) {
-                const targetTime = (savedProgress / 100) * videoRef.current.duration;
-                videoRef.current.currentTime = targetTime;
-                setProgress(savedProgress);
-              }
-            }, { once: true });
+        const snapProg = await getDocs(qProg);
+        let savedProgress = 0;
+
+        if (!snapProg.empty) {
+          savedProgress = snapProg.docs[0].data().progress || 0;
+        } else {
+          const qHist = query(
+            collection(db, 'history'),
+            where('profileId', '==', profile.id),
+            where('movieId', '==', movie.id)
+          );
+          const snapHist = await getDocs(qHist);
+          if (!snapHist.empty) {
+            savedProgress = snapHist.docs[0].data().progress || 0;
           }
+        }
+
+        if (videoRef.current && savedProgress > 0 && savedProgress < 98 && !isTrailerMode) {
+          // Wait for metadata to load to apply seek
+          videoRef.current.addEventListener('loadedmetadata', () => {
+            if (videoRef.current) {
+              const targetTime = (savedProgress / 100) * videoRef.current.duration;
+              videoRef.current.currentTime = targetTime;
+              setProgress(savedProgress);
+            }
+          }, { once: true });
         }
       } catch (err) {
         console.error('Error loading history:', err);
@@ -88,7 +101,10 @@ export default function VideoPlayer({ movie, profile, isPremium, onClose, onSubs
         const currentProgress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
         if (isNaN(currentProgress)) return;
 
+        const calculatedProgress = Math.min(Math.round(currentProgress), 100);
+
         try {
+          // 1. Sync 'history'
           const q = query(
             collection(db, 'history'),
             where('profileId', '==', profile.id),
@@ -100,18 +116,41 @@ export default function VideoPlayer({ movie, profile, isPremium, onClose, onSubs
             await addDoc(collection(db, 'history'), {
               profileId: profile.id,
               movieId: movie.id,
-              progress: Math.min(Math.round(currentProgress), 100),
+              progress: calculatedProgress,
               updatedAt: Date.now()
             });
           } else {
             const docId = snapshot.docs[0].id;
             await updateDoc(doc(db, 'history', docId), {
-              progress: Math.min(Math.round(currentProgress), 100),
+              progress: calculatedProgress,
+              updatedAt: Date.now()
+            });
+          }
+
+          // 2. Sync 'progress' for Continue Watching
+          const qProg = query(
+            collection(db, 'progress'),
+            where('profileId', '==', profile.id),
+            where('movieId', '==', movie.id)
+          );
+          const snapProg = await getDocs(qProg);
+
+          if (snapProg.empty) {
+            await addDoc(collection(db, 'progress'), {
+              profileId: profile.id,
+              movieId: movie.id,
+              progress: calculatedProgress,
+              updatedAt: Date.now()
+            });
+          } else {
+            const progDocId = snapProg.docs[0].id;
+            await updateDoc(doc(db, 'progress', progDocId), {
+              progress: calculatedProgress,
               updatedAt: Date.now()
             });
           }
         } catch (err) {
-          console.error('Error updating history:', err);
+          console.error('Error updating progress:', err);
         }
       }
     }, 5000); // sync every 5 seconds

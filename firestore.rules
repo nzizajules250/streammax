@@ -27,6 +27,11 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    // Progress
+    match /progress/{progressId} {
+      allow read, write: if isSignedIn();
+    }
+
     // Reviews
     match /reviews/{reviewId} {
       allow read, write: if isSignedIn();
