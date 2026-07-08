@@ -6,6 +6,9 @@ import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import { Resend } from 'resend';
+import pkg from 'pg';
 
 // Load environment variables
 dotenv.config();
@@ -15,7 +18,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __cwd = process.cwd();
 
 // Load Firebase applet configuration
-import firebaseConfig from './firebase-applet-config.json' assert { type: 'json' };
+import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 
 // Initialize Firebase Admin SDK
 if (getApps().length === 0) {
@@ -25,6 +28,16 @@ if (getApps().length === 0) {
 }
 
 const db = getFirestore();
+const { Pool } = pkg;
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const pgPool = process.env.DATABASE_URL || process.env.POSTGRES_URL ? new Pool({ connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL }) : null;
+
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret';
+const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'dev_admin_jwt_secret';
+
+// In-memory stores as fallback when Postgres is not configured
+const userStore = new Map<string, any>();
+const adminStore = new Map<string, { email: string; passwordHash: string; name?: string }>();
 
 const CLERK_PEM_DEFAULT = `-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsuX6xQsjqcIS4SzunDSr
@@ -35,6 +48,25 @@ JLt8ckybJ046vGG6BF7bTO/woes5ijoiY6v+JmaZflrFLrXRXEthLAzidXTCZAYt
 rAEUF9tpZ3WnqCkF7BelcADeBTkUmhFUPIreNzGB1ODnJb/1JAO8ud4YVpNunNuv
 sQIDAQAB
 -----END PUBLIC KEY-----`;
+
+const verifyAdminToken = (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: Admin token required.' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (decoded.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: Admin role required.' });
+    }
+    req.admin = decoded;
+    next();
+  } catch (err: any) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid or expired token.' });
+  }
+};
 
 const verifyClerkToken = (req: any, res: any, next: any) => {
   const authHeader = req.headers.authorization;
@@ -62,6 +94,277 @@ const app = express();
 app.use(express.json());
 
 const PORT = 3000;
+
+/**
+ * ADMIN AUTH ENDPOINTS
+ */
+app.post('/api/admin/register', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+
+  const normalizedEmail = String(email).toLowerCase().trim();
+  if (adminStore.has(normalizedEmail)) {
+    return res.status(400).json({ error: 'This admin account already exists.' });
+  }
+
+  const adminId = `admin_${Date.now()}`;
+  adminStore.set(normalizedEmail, {
+    adminId,
+    email: normalizedEmail,
+    password: password,
+    createdAt: Date.now(),
+  });
+
+  const token = jwt.sign(
+    { adminId, email: normalizedEmail, role: 'admin' },
+    JWT_SECRET,
+    { expiresIn: '30d' }
+  );
+
+  return res.json({
+    success: true,
+    message: 'Admin account created successfully.',
+    adminToken: token,
+  });
+});
+
+app.post('/api/admin/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+
+  const normalizedEmail = String(email).toLowerCase().trim();
+  const admin = adminStore.get(normalizedEmail);
+  if (!admin || admin.password !== password) {
+    return res.status(401).json({ error: 'Invalid email or password.' });
+  }
+
+  const token = jwt.sign(
+    { adminId: admin.adminId, email: normalizedEmail, role: 'admin' },
+    JWT_SECRET,
+    { expiresIn: '30d' }
+  );
+
+  return res.json({
+    success: true,
+    message: 'Admin logged in successfully.',
+    adminToken: token,
+  });
+});
+const verificationStore = new Map<string, { code: string; expiresAt: number }>();
+
+const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+interface MovieRecord {
+  id: string;
+  title: string;
+  synopsis: string;
+  backdropUrl: string;
+  posterUrl: string;
+  videoUrl: string;
+  category: string;
+  rating: number;
+  releaseYear: number;
+  duration: string;
+  ageRating: string;
+  genres: string[];
+  cast: string[];
+  isTrending?: boolean;
+  isPopular?: boolean;
+  trendingRank?: number;
+}
+
+const movieStore = new Map<string, MovieRecord>();
+
+async function ensureDatabaseSchema() {
+  if (!pgPool) return;
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      full_name TEXT,
+      password_hash TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      user_id TEXT PRIMARY KEY,
+      is_premium BOOLEAN DEFAULT FALSE,
+      tx_ref TEXT,
+      transaction_id TEXT,
+      subscribed_at BIGINT,
+      expires_at BIGINT
+    )
+  `);
+}
+
+ensureDatabaseSchema().catch((error) => console.error('Database bootstrap error:', error));
+
+app.post('/api/auth/send-code', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ error: 'A valid email is required.' });
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+  const code = generateCode();
+  verificationStore.set(normalizedEmail, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
+
+  try {
+    if (resend) {
+      await resend.emails.send({
+        from: 'Netflix Studio <onboarding@resend.dev>',
+        to: [normalizedEmail],
+        subject: 'Your StreamMax verification code',
+        html: `<p>Your StreamMax verification code is <strong>${code}</strong>.</p><p>This code expires in 10 minutes.</p>`,
+      });
+      return res.json({ success: true, message: `A 6-digit verification code was sent to ${normalizedEmail}.` });
+    }
+
+    console.log(`[auth] verification code for ${normalizedEmail}: ${code}`);
+    return res.json({
+      success: true,
+      message: `A 6-digit verification code was prepared for ${normalizedEmail}.`,
+      debugCode: code,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Unable to send verification code.' });
+  }
+});
+
+app.post('/api/auth/verify-code', async (req, res) => {
+  const { email, code } = req.body || {};
+  if (!email || !code) {
+    return res.status(400).json({ error: 'Email and verification code are required.' });
+  }
+
+  const normalizedEmail = String(email).toLowerCase().trim();
+  const record = verificationStore.get(normalizedEmail);
+  if (!record) {
+    return res.status(400).json({ error: 'No verification code was requested for that email.' });
+  }
+
+  if (record.expiresAt < Date.now()) {
+    verificationStore.delete(normalizedEmail);
+    return res.status(400).json({ error: 'The verification code has expired. Please request a new one.' });
+  }
+
+  if (record.code !== String(code).trim()) {
+    return res.status(400).json({ error: 'The verification code is incorrect.' });
+  }
+
+  verificationStore.delete(normalizedEmail);
+
+  // Create or lookup user record (persist to Postgres if available)
+  let user: any = null;
+  if (pgPool) {
+    try {
+      const result = await pgPool.query('SELECT id, email, full_name FROM users WHERE email = $1', [normalizedEmail]);
+      if (result.rows.length === 0) {
+        const insert = await pgPool.query('INSERT INTO users(email, full_name) VALUES($1,$2) RETURNING id, email, full_name', [normalizedEmail, '']);
+        user = { uid: `u_${insert.rows[0].id}`, email: insert.rows[0].email, displayName: insert.rows[0].full_name || insert.rows[0].email.split('@')[0] };
+      } else {
+        const r = result.rows[0];
+        user = { uid: `u_${r.id}`, email: r.email, displayName: r.full_name || r.email.split('@')[0] };
+      }
+    } catch (err) {
+      console.error('Postgres user lookup error:', err.message);
+    }
+  }
+
+  if (!user) {
+    // fallback to in-memory user
+    const uid = `u_${Date.now()}`;
+    user = { uid, email: normalizedEmail, displayName: normalizedEmail.split('@')[0] };
+    userStore.set(uid, user);
+  }
+
+  const token = jwt.sign({ uid: user.uid, email: user.email, displayName: user.displayName }, JWT_SECRET, { algorithm: 'HS256', expiresIn: '30d' });
+
+  return res.json({ success: true, message: 'Email verified successfully.', user, token });
+});
+
+app.get('/api/movies', (req, res) => {
+  const movies = Array.from(movieStore.values());
+  return res.json({ success: true, movies });
+});
+
+app.post('/api/movies', verifyAdminToken, (req, res) => {
+
+  const payload = req.body || {};
+  const movie: MovieRecord = {
+    id: `m_${Date.now()}`,
+    title: payload.title || 'Untitled Movie',
+    synopsis: payload.synopsis || '',
+    backdropUrl: payload.backdropUrl || '',
+    posterUrl: payload.posterUrl || '',
+    videoUrl: payload.videoUrl || '',
+    category: payload.category || 'New Releases',
+    rating: Number(payload.rating) || 4.7,
+    releaseYear: Number(payload.releaseYear) || 2026,
+    duration: payload.duration || '2h 10m',
+    ageRating: payload.ageRating || 'PG-13',
+    genres: Array.isArray(payload.genres) ? payload.genres : [],
+    cast: Array.isArray(payload.cast) ? payload.cast : [],
+    isTrending: Boolean(payload.isTrending),
+    isPopular: Boolean(payload.isPopular),
+  };
+
+  movieStore.set(movie.id, movie);
+  return res.json({ success: true, movie });
+});
+
+app.put('/api/movies/:id', verifyAdminToken, (req, res) => {
+
+  const movieId = req.params.id;
+  const existing = movieStore.get(movieId);
+  if (!existing) return res.status(404).json({ error: 'Movie not found' });
+
+  const payload = req.body || {};
+  const updated: MovieRecord = {
+    ...existing,
+    title: payload.title || existing.title,
+    synopsis: payload.synopsis || existing.synopsis,
+    backdropUrl: payload.backdropUrl || existing.backdropUrl,
+    posterUrl: payload.posterUrl || existing.posterUrl,
+    videoUrl: payload.videoUrl || existing.videoUrl,
+    category: payload.category || existing.category,
+    rating: Number(payload.rating) || existing.rating,
+    releaseYear: Number(payload.releaseYear) || existing.releaseYear,
+    duration: payload.duration || existing.duration,
+    ageRating: payload.ageRating || existing.ageRating,
+    genres: Array.isArray(payload.genres) ? payload.genres : existing.genres,
+    cast: Array.isArray(payload.cast) ? payload.cast : existing.cast,
+    isTrending: Boolean(payload.isTrending),
+    isPopular: Boolean(payload.isPopular),
+  };
+
+  movieStore.set(movieId, updated);
+  return res.json({ success: true, movie: updated });
+});
+
+app.delete('/api/movies/:id', verifyAdminToken, (req, res) => {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded: any = jwt.verify(token, ADMIN_JWT_SECRET);
+    if (!decoded || decoded.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid admin token' });
+  }
+
+  const movieId = req.params.id;
+  const exists = movieStore.has(movieId);
+  if (!exists) return res.status(404).json({ error: 'Movie not found' });
+  movieStore.delete(movieId);
+  return res.json({ success: true });
+});
 
 /**
  * FLUTTERWAVE ENDPOINT: Initialize Subscription Payment
@@ -93,19 +396,7 @@ app.post('/api/payments/initialize', verifyClerkToken, async (req, res) => {
       },
       body: JSON.stringify({
         tx_ref,
-        amount: '9.99',
-        currency: 'USD',
-        redirect_url: `${req.protocol}://${req.get('host')}/api/payments/callback`,
-        customer: {
-          email,
-          name: name || email.split('@')[0],
-        },
-        customizations: {
-          title: 'Netflix AI Studio Premium',
-          description: 'Cinematic streaming access subscription',
-          logo: 'https://ais-dev-mycejubhhan6dftuztqusc-65926885738.europe-west2.run.app/assets/netflix_logo.png',
-        },
-      }),
+        amount: '9.99',verifyAdminToken, (req, res) => {      }),
     });
 
     if (!response.ok) {
@@ -226,6 +517,58 @@ app.post('/api/notifications/simulate-release', async (req, res) => {
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * ADMIN: register and login endpoints (simple JWT + bcrypt)
+ */
+app.post('/api/admin/register', async (req, res) => {
+  const { email, password, name } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+
+  const normalized = String(email).toLowerCase().trim();
+  const passwordHash = await bcrypt.hash(String(password), 10);
+
+  if (pgPool) {
+    try {
+      await pgPool.query('INSERT INTO admins(email,password_hash,full_name) VALUES($1,$2,$3) ON CONFLICT (email) DO NOTHING', [normalized, passwordHash, name || '']);
+    } catch (err) {
+      console.error('Postgres admin insert error:', err.message);
+      return res.status(500).json({ error: 'Unable to create admin' });
+    }
+  } else {
+    adminStore.set(normalized, { email: normalized, passwordHash, name });
+  }
+
+  return res.json({ success: true, message: 'Admin registered' });
+});
+
+app.post('/api/admin/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+  const normalized = String(email).toLowerCase().trim();
+
+  let passwordHash: string | null = null;
+  if (pgPool) {
+    try {
+      const r = await pgPool.query('SELECT password_hash FROM admins WHERE email = $1', [normalized]);
+      if (r.rows.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
+      passwordHash = r.rows[0].password_hash;
+    } catch (err) {
+      console.error('Postgres admin lookup error:', err.message);
+      return res.status(500).json({ error: 'Login failed' });
+    }
+  } else {
+    const rec = adminStore.get(normalized);
+    if (!rec) return res.status(401).json({ error: 'Invalid credentials' });
+    passwordHash = rec.passwordHash;
+  }
+
+  const match = await bcrypt.compare(String(password), passwordHash || '');
+  if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+
+  const token = jwt.sign({ email: normalized, role: 'admin' }, ADMIN_JWT_SECRET, { algorithm: 'HS256', expiresIn: '7d' });
+  return res.json({ success: true, token });
 });
 
 // Vite server or static production deployment middleware

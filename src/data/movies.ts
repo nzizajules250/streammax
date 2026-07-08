@@ -7,7 +7,7 @@ export const MOVIES: Movie[] = [
     synopsis: 'When a young boy vanishes from a small Indiana town, his friends uncover a secret government lab, a portal to a dark parallel dimension, and a mysterious girl with powerful telekinetic abilities.',
     backdropUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=1200&q=80',
     posterUrl: 'https://images.unsplash.com/photo-1618336753974-aae8e04506aa?auto=format&fit=crop&w=400&q=80',
-    videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1611-large.mp4',
+    videoUrl: 'https://www.youtube.com/embed/mnd7sFt5c3A',
     category: 'Sci-Fi & Thrillers',
     rating: 4.9,
     releaseYear: 2026,

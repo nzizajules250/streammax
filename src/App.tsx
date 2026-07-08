@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Movie, UserProfile, UserSubscription, InAppNotification } from './types';
 import { MOVIES } from './data/movies';
-import AuthScreen from './components/AuthScreen';
+import AdminCMSPage from './components/AdminCMSPage';
+import AuthPage from './components/AuthPage';
 import ProfileSelector from './components/ProfileSelector';
 import PaymentSimulator from './components/PaymentSimulator';
 import HeroBanner from './components/HeroBanner';
@@ -12,6 +13,7 @@ import {
   Search, Bell, ChevronDown, Sparkles, Wifi, WifiOff, HelpCircle, X, List, Compass, 
   Film, LogOut, Check, ArrowRight, ShieldAlert, CreditCard, Download, Trash2
 } from 'lucide-react';
+import { initializeSubscriptionCheckout } from './lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 
 const GUEST_PROFILE: UserProfile = {
@@ -24,7 +26,7 @@ const GUEST_PROFILE: UserProfile = {
 const DEFAULT_NOTIFICATIONS: InAppNotification[] = [
   {
     id: 'notif_welcome',
-    title: 'Welcome to Netflix Studio!',
+    title: 'Welcome to Stream Max!',
     message: 'Unlock personalized profiles, custom subtitle accent colors, and 4K cinema feeds.',
     userId: 'all',
     timestamp: Date.now() - 60000 * 5, // 5 min ago
@@ -43,11 +45,7 @@ const DEFAULT_NOTIFICATIONS: InAppNotification[] = [
 ];
 
 export default function App() {
-  // 1. Payment Simulator Intercept
-  const isSimulatorPath = window.location.pathname === '/payment-simulator';
-  if (isSimulatorPath) {
-    return <PaymentSimulator />;
-  }
+  const pathname = window.location.pathname;
 
   // 2. Client-side Authentication state
   const [authUser, setAuthUser] = useState<{ uid: string; email: string; displayName: string } | null>(() => {
@@ -76,6 +74,7 @@ export default function App() {
 
   // 6. In-App Peer Sharing Recommendations state
   const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [movies, setMovies] = useState<Movie[]>(MOVIES);
 
   // 7. Notifications State
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
@@ -93,6 +92,22 @@ export default function App() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [showToast, setShowToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadMovies = async () => {
+      try {
+        const response = await fetch('/api/movies');
+        const data = await response.json();
+        if (response.ok && Array.isArray(data.movies)) {
+          setMovies(data.movies);
+        }
+      } catch (error) {
+        console.warn('Unable to load movies from backend, using bundled data.', error);
+      }
+    };
+
+    loadMovies();
+  }, []);
 
   // Detect URL share referrals (e.g. /?watch=m2) & Payment redirects
   useEffect(() => {
@@ -298,20 +313,28 @@ export default function App() {
     handleLogoutProfile();
   };
 
-  const handleInitiateCheckout = () => {
+  const handleInitiateCheckout = async () => {
     if (!authUser) return;
     setIsCheckoutLoading(true);
 
-    setTimeout(() => {
-      const txRef = `sim_tx_${Date.now()}`;
-      const email = encodeURIComponent(authUser.email);
-      const uid = encodeURIComponent(authUser.uid);
-      const name = encodeURIComponent(authUser.displayName || '');
-      
-      // Redirect to sandbox payment simulator directly
-      window.location.href = `/payment-simulator?tx_ref=${txRef}&email=${email}&uid=${uid}&name=${name}`;
+    try {
+      const response = await initializeSubscriptionCheckout({
+        email: authUser.email,
+        uid: authUser.uid,
+        profileId: activeProfile?.id || 'default',
+        name: authUser.displayName || authUser.email,
+      });
+
+      if (response.checkoutUrl) {
+        window.location.href = response.checkoutUrl;
+      } else {
+        setShowToast('Subscription checkout is unavailable right now.');
+      }
+    } catch (error: any) {
+      setShowToast(error.message || 'Checkout could not be started.');
+    } finally {
       setIsCheckoutLoading(false);
-    }, 800);
+    }
   };
 
   const handleAuthRequired = () => {
@@ -330,13 +353,13 @@ export default function App() {
 
   const markNotificationRead = (id: string) => {
     const key = `notifications_${authUser?.uid || 'guest'}`;
-    const updated = notifications.map(n => n.id === id ? { ...n, isRead: true } : n);
+    const updated = notifications.map((n: any) => n.id === id ? { ...n, isRead: true } : n);
     localStorage.setItem(key, JSON.stringify(updated));
     setNotifications(updated);
   };
 
   // Movie collections filter
-  let baseMovies = MOVIES;
+  let baseMovies = movies;
   if (isOfflineMode && activeProfile) {
     baseMovies = MOVIES.filter(m => downloadedMovieIds.includes(m.id));
   }
@@ -348,7 +371,7 @@ export default function App() {
   const watchlistMovies = baseMovies.filter(m => watchlistMovieIds.includes(m.id));
   
   // Peer recommendation movies mapping
-  const recommendedMovieIds = recommendations.map(r => r.movieId);
+  const recommendedMovieIds = recommendations.map((r: any) => r.movieId);
   const recommendedMovies = baseMovies.filter(m => recommendedMovieIds.includes(m.id));
 
   // Search filter
@@ -373,9 +396,21 @@ export default function App() {
     );
   }
 
+  if (pathname === '/payment-simulator') {
+    return <PaymentSimulator />;
+  }
+
   // Auth Guard & Force Auth
+  if (pathname === '/auth' && !authUser) {
+    return <AuthPage onClose={() => setForceAuthScreen(false)} onLoginSuccess={(u) => setAuthUser(u)} />;
+  }
+
+  if (pathname === '/admin' || pathname === '/cms') {
+    return <AdminCMSPage />;
+  }
+
   if (forceAuthScreen && !authUser) {
-    return <AuthScreen onClose={() => setForceAuthScreen(false)} onLoginSuccess={(u) => setAuthUser(u)} />;
+    return <AuthPage onClose={() => setForceAuthScreen(false)} onLoginSuccess={(u) => setAuthUser(u)} />;
   }
 
   // Profile Selection Guard (only applies to authenticated users)
@@ -806,7 +841,7 @@ export default function App() {
 
                   {/* Dynamic Peer recommendation row */}
                   {recommendedMovies.length > 0 && (
-                    <div className="bg-gradient-to-r from-red-950/20 via-transparent to-transparent py-4 border-y border-red-500/10">
+                    <div className="bg-linear-to-r from-red-950/20 via-transparent to-transparent py-4 border-y border-red-500/10">
                       <MovieRow
                         title="Shared with me"
                         movies={recommendedMovies}
