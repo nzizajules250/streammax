@@ -12,7 +12,6 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
   const [mode, setMode] = useState<'login' | 'signup'>('signup');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [step, setStep] = useState<'form' | 'verify'>('form');
   const [isLoading, setIsLoading] = useState(false);
@@ -116,18 +115,6 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
               </button>
             </div>
-          </div>
-
-          {mode === 'signup' ? (
-            <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">Full Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm outline-none ring-0" placeholder="Alicia Brooks" />
-            </div>
-          ) : null}
-
-          <div>
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm outline-none ring-0" placeholder="Enter a secure password" />
           </div>
 
           <div>
