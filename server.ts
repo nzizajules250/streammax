@@ -19,7 +19,8 @@ const __cwd = process.cwd();
 const { Pool } = pkg;
 const pgPool = process.env.DATABASE_URL || process.env.POSTGRES_URL ? new Pool({ connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL }) : null;
 const mux = process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET ? new Mux({ tokenId: process.env.MUX_TOKEN_ID, tokenSecret: process.env.MUX_TOKEN_SECRET }) : null;
-const resend = process.env.RESEND_API_KEY ?  new Resend('re_W7eRvHRf_Gzf3NpJdZGcRnTFFw5b9RbMi') : null ;
+const resendApiKey = process.env.RESEND_API_KEY || 're_W7eRvHRf_Gzf3NpJdZGcRnTFFw5b9RbMi';
+const resend = new Resend(resendApiKey);
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret';
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'dev_admin_jwt_secret';
@@ -303,7 +304,7 @@ app.post('/api/auth/send-code', async (req, res) => {
   try {
     if (resend) {
       await resend.emails.send({
-        from: 'Stream Max <streammax@streammaxcomp.com>',
+        from: 'Stream Max <onboarding@resend.dev>',
         to: [normalizedEmail],
         subject: 'Your StreamMax verification code',
         html: `<p>Your StreamMax verification code is <strong>${code}</strong>.</p><p>This code expires in 10 minutes.</p>`,

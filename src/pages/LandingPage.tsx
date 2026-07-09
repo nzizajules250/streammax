@@ -60,22 +60,22 @@ export default function LandingPage({
   });
 
   return (
-    <div className="pt-24 pb-20">
+    <div className="min-h-screen bg-[#040404] text-white pt-24 pb-20">
       {searchQuery ? (
         <div className="px-4 md:px-12 pt-10 space-y-6">
-          <h1 className="text-xl md:text-2xl font-bold text-neutral-300">
+          <h1 className="text-xl md:text-2xl font-bold text-red-400">
             Showing search results for <span className="text-white">"{searchQuery}"</span>
           </h1>
 
           {searchedMovies.length === 0 ? (
-            <div className="text-center py-20 text-neutral-500 flex flex-col items-center justify-center">
-              <p className="font-semibold text-lg">No matches found</p>
-              <p className="text-sm mt-1 text-neutral-400">Try adjusting your keywords or toggling Offline Mode.</p>
+            <div className="text-center py-20 text-red-300 flex flex-col items-center justify-center">
+              <p className="font-semibold text-lg text-white">No matches found</p>
+              <p className="text-sm mt-1 text-red-400">Try adjusting your keywords or toggling Offline Mode.</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               {searchedMovies.map((movie) => (
-                <div key={movie.id} onClick={() => setSelectedMovie(movie)} className="bg-neutral-900 rounded-lg overflow-hidden border border-neutral-800 hover:border-neutral-700 transition-all cursor-pointer group flex flex-col justify-between">
+                <div key={movie.id} onClick={() => setSelectedMovie(movie)} className="bg-[#110202] rounded-lg overflow-hidden border border-red-900 hover:border-red-700 transition-all cursor-pointer group flex flex-col justify-between">
                   <div className="relative aspect-video">
                     <img src={movie.backdropUrl} alt={movie.title} className="w-full h-full object-cover filter brightness-95" referrerPolicy="no-referrer" />
                     <span className="absolute top-2 right-2 bg-red-600 text-[9px] font-bold px-1.5 py-0.5 rounded font-mono">{movie.rating}</span>
