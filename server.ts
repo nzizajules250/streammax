@@ -1,15 +1,13 @@
-import express from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { Resend } from 'resend';
 import pkg from 'pg';
 import Mux from '@mux/mux-node';
+import { Resend } from 'resend';
 
 // Load environment variables
 dotenv.config();
@@ -18,40 +16,37 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __cwd = process.cwd();
 
-// Load Firebase applet configuration
-import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
-
-// Initialize Firebase Admin SDK
-if (getApps().length === 0) {
-  initializeApp({
-    projectId: firebaseConfig.projectId,
-  });
-}
-
-const db = getFirestore();
 const { Pool } = pkg;
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const pgPool = process.env.DATABASE_URL || process.env.POSTGRES_URL ? new Pool({ connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL }) : null;
 const mux = process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET ? new Mux({ tokenId: process.env.MUX_TOKEN_ID, tokenSecret: process.env.MUX_TOKEN_SECRET }) : null;
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret';
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'dev_admin_jwt_secret';
 
 // In-memory stores as fallback when Postgres is not configured
 const userStore = new Map<string, any>();
-const adminStore = new Map<string, { email: string; passwordHash: string; name?: string }>();
 
-const CLERK_PEM_DEFAULT = `-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsuX6xQsjqcIS4SzunDSr
-MBFiIIt1zKWRvsVURl0nud7yQNZOt56hi1fSMOmLh/WfMYvwQ93vKezl+Y9QahI/
-AYTDg4dA5a5vBn3ssjFT9SxKEGLx7o57ApUpSDc4HqjfpRlPg951M/cqhoo6/R69
-FkESTg9MsmSp2AvKBy6KqdhEs3I2ENWYa9yqd9/wc2mhmEUpG84RRHI0TtXmeMIb
-JLt8ckybJ046vGG6BF7bTO/woes5ijoiY6v+JmaZflrFLrXRXEthLAzidXTCZAYt
-rAEUF9tpZ3WnqCkF7BelcADeBTkUmhFUPIreNzGB1ODnJb/1JAO8ud4YVpNunNuv
-sQIDAQAB
------END PUBLIC KEY-----`;
+interface AdminRecord {
+  adminId: string;
+  email: string;
+  passwordHash: string;
+  name?: string;
+  createdAt?: number;
+}
 
-const verifyAdminToken = (req: any, res: any, next: any) => {
+const adminStore = new Map<string, AdminRecord>();
+const subscriptionStore = new Map<string, any>();
+const notificationStore = new Map<string, any[]>();
+
+type AuthenticatedRequest = Request & {
+  user?: Record<string, any>;
+  admin?: Record<string, any>;
+};
+
+const getErrorMessage = (error: unknown) => error instanceof Error ? error.message : 'Unknown error';
+
+const verifyAdminToken = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Unauthorized: Admin token required.' });
@@ -59,36 +54,14 @@ const verifyAdminToken = (req: any, res: any, next: any) => {
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, ADMIN_JWT_SECRET);
+    const decoded = jwt.verify(token, ADMIN_JWT_SECRET) as Record<string, any>;
     if (decoded.role !== 'admin') {
       return res.status(403).json({ error: 'Forbidden: Admin role required.' });
     }
     req.admin = decoded;
     next();
-  } catch (err: any) {
+  } catch (err) {
     return res.status(401).json({ error: 'Unauthorized: Invalid or expired token.' });
-  }
-};
-
-const verifyClerkToken = (req: any, res: any, next: any) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
-  }
-
-  const token = authHeader.split(' ')[1];
-  const publicKeyRaw = process.env.CLERK_PEM_PUBLIC_KEY || CLERK_PEM_DEFAULT;
-  const publicKey = publicKeyRaw.replace(/\\n/g, '\n');
-
-  try {
-    const decoded = jwt.verify(token, publicKey, {
-      algorithms: ['RS256']
-    });
-    req.user = decoded;
-    next();
-  } catch (err: any) {
-    console.error('JWT Verification error:', err.message);
-    return res.status(401).json({ error: 'Unauthorized: Session verification failed.', details: err.message });
   }
 };
 
@@ -97,65 +70,6 @@ app.use(express.json());
 
 const PORT = 3000;
 
-/**
- * ADMIN AUTH ENDPOINTS
- */
-app.post('/api/admin/register', async (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required.' });
-  }
-
-  const normalizedEmail = String(email).toLowerCase().trim();
-  if (adminStore.has(normalizedEmail)) {
-    return res.status(400).json({ error: 'This admin account already exists.' });
-  }
-
-  const adminId = `admin_${Date.now()}`;
-  adminStore.set(normalizedEmail, {
-    adminId,
-    email: normalizedEmail,
-    password: password,
-    createdAt: Date.now(),
-  });
-
-  const token = jwt.sign(
-    { adminId, email: normalizedEmail, role: 'admin' },
-    JWT_SECRET,
-    { expiresIn: '30d' }
-  );
-
-  return res.json({
-    success: true,
-    message: 'Admin account created successfully.',
-    adminToken: token,
-  });
-});
-
-app.post('/api/admin/login', async (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required.' });
-  }
-
-  const normalizedEmail = String(email).toLowerCase().trim();
-  const admin = adminStore.get(normalizedEmail);
-  if (!admin || admin.password !== password) {
-    return res.status(401).json({ error: 'Invalid email or password.' });
-  }
-
-  const token = jwt.sign(
-    { adminId: admin.adminId, email: normalizedEmail, role: 'admin' },
-    JWT_SECRET,
-    { expiresIn: '30d' }
-  );
-
-  return res.json({
-    success: true,
-    message: 'Admin logged in successfully.',
-    adminToken: token,
-  });
-});
 const verificationStore = new Map<string, { code: string; expiresAt: number }>();
 
 const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -183,8 +97,63 @@ interface MovieRecord {
 
 const movieStore = new Map<string, MovieRecord>();
 
+const DEFAULT_MOVIES: Array<Omit<MovieRecord, 'id'>> = [
+  {
+    title: 'Midnight Circuit',
+    synopsis: 'A rogue AI programmer discovers a hidden network that predicts the future of cinema.',
+    backdropUrl: 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=1400&q=80',
+    posterUrl: 'https://images.unsplash.com/photo-1517602302552-471fe67acf66?auto=format&fit=crop&w=800&q=80',
+    videoUrl: 'https://www.w3schools.com/html/mov_bbb.mp4',
+    trailerUrl: 'https://www.w3schools.com/html/movie.mp4',
+    category: 'Sci-Fi & Thrillers',
+    rating: 4.8,
+    releaseYear: 2026,
+    duration: '2h 08m',
+    ageRating: 'PG-13',
+    genres: ['Sci-Fi', 'Thriller', 'Action'],
+    cast: ['Maya Chen', 'Jordan Brooks', 'Alicia Price'],
+    isTrending: true,
+    isPopular: true,
+    muxPlaybackId: 'demo-midnight-circuit',
+  },
+  {
+    title: 'Golden Hour',
+    synopsis: 'A struggling filmmaker returns home to shoot a secretive wedding story that changes everything.',
+    backdropUrl: 'https://images.unsplash.com/photo-1478720568477-152d9b164e26?auto=format&fit=crop&w=1400&q=80',
+    posterUrl: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=800&q=80',
+    videoUrl: 'https://www.w3schools.com/html/movie.mp4',
+    category: 'Award-Winning Dramas',
+    rating: 4.6,
+    releaseYear: 2025,
+    duration: '1h 57m',
+    ageRating: 'PG',
+    genres: ['Drama', 'Romance'],
+    cast: ['Elena Cruz', 'Samir Cole'],
+    isTrending: true,
+    isPopular: false,
+  },
+  {
+    title: 'Neon Harbor',
+    synopsis: 'A team of marine architects races to save a city from a rising tide and a hidden conspiracy.',
+    backdropUrl: 'https://images.unsplash.com/photo-1517602302552-471fe67acf66?auto=format&fit=crop&w=1400&q=80',
+    posterUrl: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=800&q=80',
+    videoUrl: 'https://www.w3schools.com/html/movie.mp4',
+    category: 'New Releases',
+    rating: 4.7,
+    releaseYear: 2026,
+    duration: '2h 14m',
+    ageRating: 'R',
+    genres: ['Action', 'Adventure'],
+    cast: ['Darius Hall', 'Nina Sol'],
+    isPopular: true,
+  },
+];
+
 async function ensureDatabaseSchema() {
-  if (!pgPool) return;
+  if (!pgPool) {
+    return;
+  }
+
   await pgPool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -234,10 +203,55 @@ async function ensureDatabaseSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS watchlist (
+      id SERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      movie_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, movie_id)
+    )
+  `);
 }
 
 // Initialize database before starting server
 await ensureDatabaseSchema();
+
+if (!pgPool) {
+  for (const [idx, movie] of DEFAULT_MOVIES.entries()) {
+    movieStore.set(`m_mem_${idx}`, {
+      id: `m_mem_${idx}`,
+      ...movie,
+    });
+  }
+}
+
+async function seedStarterMovies() {
+  if (!pgPool) return;
+  try {
+    const existing = await pgPool.query('SELECT COUNT(*)::int AS count FROM movies');
+    if ((existing.rows[0]?.count ?? 0) > 0) {
+      return;
+    }
+
+    for (const movie of DEFAULT_MOVIES) {
+      const movieId = `m_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      await pgPool.query(
+        `INSERT INTO movies(id, title, synopsis, backdrop_url, poster_url, video_url, category, rating, release_year, duration, age_rating, genres, "cast", is_trending, is_popular, mux_playback_id, trailer_url)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+        [movieId, movie.title, movie.synopsis, movie.backdropUrl, movie.posterUrl, movie.videoUrl, movie.category, movie.rating, movie.releaseYear, movie.duration, movie.ageRating, movie.genres, movie.cast, movie.isTrending, movie.isPopular, movie.muxPlaybackId || null, movie.trailerUrl || null]
+      );
+    }
+  } catch (error) {
+    console.error('Starter movie seed error:', getErrorMessage(error));
+  }
+}
+
+await seedStarterMovies();
+
+app.get('/api/health', (_req, res) => {
+  res.json({ success: true, status: 'ok', database: pgPool ? 'postgres' : 'memory' });
+});
 
 app.post('/api/auth/send-code', async (req, res) => {
   const { email } = req.body || {};
@@ -252,7 +266,7 @@ app.post('/api/auth/send-code', async (req, res) => {
   try {
     if (resend) {
       await resend.emails.send({
-        from: 'Netflix Studio <onboarding@resend.dev>',
+        from: 'Stream Max <streammax@streammaxcomp.com>',
         to: [normalizedEmail],
         subject: 'Your StreamMax verification code',
         html: `<p>Your StreamMax verification code is <strong>${code}</strong>.</p><p>This code expires in 10 minutes.</p>`,
@@ -272,7 +286,7 @@ app.post('/api/auth/send-code', async (req, res) => {
 });
 
 app.post('/api/auth/verify-code', async (req, res) => {
-  const { email, code } = req.body || {};
+  const { email, code, name } = req.body || {};
   if (!email || !code) {
     return res.status(400).json({ error: 'Email and verification code are required.' });
   }
@@ -300,14 +314,15 @@ app.post('/api/auth/verify-code', async (req, res) => {
     try {
       const result = await pgPool.query('SELECT id, email, full_name FROM users WHERE email = $1', [normalizedEmail]);
       if (result.rows.length === 0) {
-        const insert = await pgPool.query('INSERT INTO users(email, full_name ) VALUES($1,$2) RETURNING id, email, full_name', [normalizedEmail, '']);
+        const fullName = String(name || '').trim() || normalizedEmail.split('@')[0];
+        const insert = await pgPool.query('INSERT INTO users(email, full_name ) VALUES($1,$2) RETURNING id, email, full_name', [normalizedEmail, fullName]);
         user = { uid: `u_${insert.rows[0].id}`, email: insert.rows[0].email, displayName: insert.rows[0].full_name || insert.rows[0].email.split('@')[0] };
       } else {
         const r = result.rows[0];
         user = { uid: `u_${r.id}`, email: r.email, displayName: r.full_name || r.email.split('@')[0] };
       }
     } catch (err) {
-      console.error('Postgres user lookup error:', err.message);
+      console.error('Postgres user lookup error:', getErrorMessage(err));
     }
   }
 
@@ -467,7 +482,74 @@ app.delete('/api/movies/:id', verifyAdminToken, async (req, res) => {
 /**
  * FLUTTERWAVE ENDPOINT: Initialize Subscription Payment
  */
-app.post('/api/payments/initialize', async (req, res) => {
+app.get('/api/subscriptions/me', async (req: AuthenticatedRequest, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+
+  try {
+    const decoded = jwt.verify(authHeader.split(' ')[1], JWT_SECRET) as Record<string, any>;
+    const uid = decoded.uid || decoded.userId || decoded.sub;
+    if (!uid) {
+      return res.status(400).json({ error: 'Missing user identity.' });
+    }
+
+    if (pgPool) {
+      const result = await pgPool.query('SELECT is_premium, tx_ref, transaction_id, subscribed_at, expires_at FROM subscriptions WHERE user_id = $1', [uid]);
+      if (result.rows.length > 0) {
+        const row = result.rows[0];
+        return res.json({
+          success: true,
+          subscription: {
+            uid,
+            isPremium: Boolean(row.is_premium),
+            txRef: row.tx_ref,
+            transactionId: row.transaction_id,
+            subscribedAt: Number(row.subscribed_at || 0),
+            expiresAt: Number(row.expires_at || 0),
+          },
+        });
+      }
+    }
+
+    const stored = subscriptionStore.get(uid);
+    if (stored) {
+      return res.json({ success: true, subscription: stored });
+    }
+
+    return res.json({ success: true, subscription: null });
+  } catch (error) {
+    return res.status(401).json({ error: 'Invalid user token.' });
+  }
+});
+
+app.get('/api/admin/stats', verifyAdminToken, async (req, res) => {
+  try {
+    if (!pgPool) {
+      return res.json({ success: true, stats: { movies: movieStore.size, users: userStore.size, subscriptions: 0 } });
+    }
+
+    const [moviesResult, usersResult, subscriptionsResult] = await Promise.all([
+      pgPool.query('SELECT COUNT(*)::int AS count FROM movies'),
+      pgPool.query('SELECT COUNT(*)::int AS count FROM users'),
+      pgPool.query('SELECT COUNT(*)::int AS count FROM subscriptions WHERE is_premium = TRUE'),
+    ]);
+
+    return res.json({
+      success: true,
+      stats: {
+        movies: Number(moviesResult.rows[0]?.count || 0),
+        users: Number(usersResult.rows[0]?.count || 0),
+        subscriptions: Number(subscriptionsResult.rows[0]?.count || 0),
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.post('/api/payments/initialize', async (req: AuthenticatedRequest, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Authentication required.' });
@@ -475,7 +557,7 @@ app.post('/api/payments/initialize', async (req, res) => {
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded: any = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET) as Record<string, any>;
     req.user = decoded;
   } catch (err) {
     return res.status(401).json({ error: 'Invalid user token.' });
@@ -573,18 +655,35 @@ app.get('/api/payments/callback', async (req, res) => {
     const parts = (tx_ref as string || '').split('_');
     if (parts.length >= 3) {
       const uid = parts[1];
-      try {
-        // Record payment in Firestore
-        await db.collection('subscriptions').doc(uid).set({
-          isPremium: true,
-          txRef: tx_ref,
-          transactionId: transaction_id || 'simulated',
-          subscribedAt: Date.now(),
-          expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
-        });
+      const txId = String(transaction_id || 'simulated');
+      const subscriptionRecord = {
+        uid,
+        isPremium: true,
+        txRef: String(tx_ref || ''),
+        transactionId: txId,
+        subscribedAt: Date.now(),
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      };
 
-        // Trigger simulation notification for receipt
-        await db.collection('notifications').add({
+      try {
+        if (pgPool) {
+          await pgPool.query(`
+            INSERT INTO subscriptions(user_id, is_premium, tx_ref, transaction_id, subscribed_at, expires_at)
+            VALUES($1,$2,$3,$4,$5,$6)
+            ON CONFLICT (user_id) DO UPDATE SET
+              is_premium = EXCLUDED.is_premium,
+              tx_ref = EXCLUDED.tx_ref,
+              transaction_id = EXCLUDED.transaction_id,
+              subscribed_at = EXCLUDED.subscribed_at,
+              expires_at = EXCLUDED.expires_at
+          `, [uid, true, subscriptionRecord.txRef, subscriptionRecord.transactionId, subscriptionRecord.subscribedAt, subscriptionRecord.expiresAt]);
+        } else {
+          subscriptionStore.set(uid, subscriptionRecord);
+        }
+
+        const notifications = notificationStore.get(uid) || [];
+        notifications.push({
+          id: `notif_${Date.now()}`,
           title: 'Premium Activated! 🍿',
           message: 'Thank you for your subscription! Unlimited Ultra-HD streaming is now fully active.',
           userId: uid,
@@ -592,8 +691,9 @@ app.get('/api/payments/callback', async (req, res) => {
           isRead: false,
           type: 'payment',
         });
+        notificationStore.set(uid, notifications);
       } catch (err) {
-        console.error('Error saving subscription status in Firebase:', err);
+        console.error('Error saving subscription status:', err);
       }
     }
     return res.redirect('/?payment=success');
@@ -610,6 +710,15 @@ app.post('/api/payments/simulate-success', async (req, res) => {
   if (!uid) return res.status(400).json({ error: 'UID is required' });
 
   try {
+    const subscriptionRecord = {
+      uid,
+      isPremium: true,
+      txRef: String(tx_ref || `sim_${Date.now()}`),
+      transactionId: `sim_${Math.floor(100000 + Math.random() * 900000)}`,
+      subscribedAt: Date.now(),
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    };
+
     if (pgPool) {
       await pgPool.query(`
         INSERT INTO subscriptions(user_id, is_premium, tx_ref, transaction_id, subscribed_at, expires_at)
@@ -620,20 +729,14 @@ app.post('/api/payments/simulate-success', async (req, res) => {
           transaction_id = EXCLUDED.transaction_id,
           subscribed_at = EXCLUDED.subscribed_at,
           expires_at = EXCLUDED.expires_at
-      `, [uid, true, tx_ref || `sim_${Date.now()}`, `sim_${Math.floor(100000 + Math.random() * 900000)}`, Date.now(), Date.now() + 30 * 24 * 60 * 60 * 1000]);
+      `, [uid, true, subscriptionRecord.txRef, subscriptionRecord.transactionId, subscriptionRecord.subscribedAt, subscriptionRecord.expiresAt]);
+    } else {
+      subscriptionStore.set(uid, subscriptionRecord);
     }
 
-    // Record premium membership
-    await db.collection('subscriptions').doc(uid).set({
-      isPremium: true,
-      txRef: tx_ref || `sim_${Date.now()}`,
-      transactionId: `sim_${Math.floor(100000 + Math.random() * 900000)}`,
-      subscribedAt: Date.now(),
-      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-    });
-
-    // Notify user of active premium status
-    await db.collection('notifications').add({
+    const notifications = notificationStore.get(uid) || [];
+    notifications.push({
+      id: `notif_${Date.now()}`,
       title: 'Premium Subscription Active! 🍿',
       message: 'Checkout completed successfully! You can now watch full movies in high-definition.',
       userId: uid,
@@ -641,8 +744,9 @@ app.post('/api/payments/simulate-success', async (req, res) => {
       isRead: false,
       type: 'payment',
     });
+    notificationStore.set(uid, notifications);
 
-    return res.json({ success: true, message: 'Subscription processed successfully.' });
+    return res.json({ success: true, message: 'Subscription processed successfully.', subscription: subscriptionRecord });
   } catch (err: any) {
     console.error('Error simulating payment success:', err);
     return res.status(500).json({ error: err.message });
@@ -655,14 +759,18 @@ app.post('/api/payments/simulate-success', async (req, res) => {
 app.post('/api/notifications/simulate-release', async (req, res) => {
   const { title, message, type, userId } = req.body;
   try {
-    await db.collection('notifications').add({
+    const targetId = userId || 'all';
+    const notifs = notificationStore.get(targetId) || [];
+    notifs.push({
+      id: `notif_${Date.now()}`,
       title: title || 'New Release Incoming!',
       message: message || 'Discover the latest additions to Netflix AI Studio today.',
-      userId: userId || 'all',
+      userId: targetId,
       timestamp: Date.now(),
       isRead: false,
       type: type || 'release',
     });
+    notificationStore.set(targetId, notifs);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -683,7 +791,7 @@ app.post('/api/admin/register', async (req, res) => {
     try {
       await pgPool.query('INSERT INTO admins(email,password_hash,full_name) VALUES($1,$2,$3) ON CONFLICT (email) DO NOTHING', [normalized, passwordHash, name || '']);
     } catch (err) {
-      console.error('Postgres admin insert error:', err.message);
+      console.error('Postgres admin insert error:', getErrorMessage(err));
       return res.status(500).json({ error: 'Unable to create admin' });
     }
   } else {
@@ -705,7 +813,7 @@ app.post('/api/admin/login', async (req, res) => {
       if (r.rows.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
       passwordHash = r.rows[0].password_hash;
     } catch (err) {
-      console.error('Postgres admin lookup error:', err.message);
+      console.error('Postgres admin lookup error:', getErrorMessage(err));
       return res.status(500).json({ error: 'Login failed' });
     }
   } else {

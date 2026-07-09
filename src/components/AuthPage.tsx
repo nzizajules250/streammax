@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Film, Loader2, Mail, ShieldCheck, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useSignIn, useSignUp } from '@clerk/clerk-react';
 import { sendVerificationCode, verifyVerificationCode } from '../lib/api';
 
 interface AuthPageProps {
@@ -19,8 +18,6 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const { isLoaded: isSignUpLoaded, signUp, setActive: setActiveSignUp } = useSignUp();
-  const { isLoaded: isSignInLoaded, signIn, setActive: setActiveSignIn } = useSignIn();
 
   const title = useMemo(() => (mode === 'signup' ? 'Create your account' : 'Welcome back'), [mode]);
 
@@ -40,20 +37,6 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
         setSuccess(`${res.message} Code: ${res.debugCode}`);
       } else {
         setSuccess(res.message || 'Verification code sent.');
-      }
-
-      if (mode === 'signup' && isSignUpLoaded && signUp) {
-        try {
-          await signUp.create({
-            firstName: name.trim().split(' ')[0] || 'User',
-            lastName: name.trim().split(' ').slice(1).join(' ') || '',
-            emailAddress: email.trim(),
-            password,
-          });
-          await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
-        } catch (clerkError: any) {
-          console.warn('Clerk signup setup warning:', clerkError?.errors?.[0]?.message || clerkError.message);
-        }
       }
       setStep('verify');
     } catch (err: any) {
@@ -83,35 +66,12 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
         throw new Error(verified.message || 'Verification failed.');
       }
 
-      // Save token and user returned from server
       if (verified.token) {
         localStorage.setItem('netflix_auth_token', verified.token);
       }
-      if (verified.user) {
-        localStorage.setItem('netflix_auth_user', JSON.stringify(verified.user));
-      }
-
-      if (mode === 'signup') {
-        if (isSignUpLoaded && signUp) {
-          try {
-            await signUp.attemptEmailAddressVerification({ code });
-            await setActiveSignUp({ session: signUp.createdSessionId || '' });
-          } catch (clerkError: any) {
-            console.warn('Clerk verification warning:', clerkError?.errors?.[0]?.message || clerkError.message);
-          }
-        }
-      } else if (isSignInLoaded && signIn) {
-        try {
-          const attempt = await signIn.create({ identifier: email.trim(), password });
-          const result = await attempt.attemptFirstFactor({ strategy: 'password', password });
-          await setActiveSignIn({ session: result.createdSessionId || '' });
-        } catch (clerkError: any) {
-          console.warn('Clerk sign-in warning:', clerkError?.errors?.[0]?.message || clerkError.message);
-        }
-      }
-
       const userFromServer = verified.user || { uid: `user_${Date.now()}`, email: email.trim(), displayName: name.trim() || email.split('@')[0] };
-      if (!verified.user) localStorage.setItem('netflix_auth_user', JSON.stringify(userFromServer));
+      localStorage.setItem('netflix_auth_user', JSON.stringify(userFromServer));
+
       if (onLoginSuccess) onLoginSuccess(userFromServer);
       if (onClose) onClose();
     } catch (err: any) {
@@ -158,9 +118,16 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
             </div>
           </div>
 
+          {mode === 'signup' ? (
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">Full Name</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm outline-none ring-0" placeholder="Alicia Brooks" />
+            </div>
+          ) : null}
+
           <div>
             <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.25em] text-zinc-500">Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm outline-none ring-0" placeholder="Create a secure password" />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm outline-none ring-0" placeholder="Enter a secure password" />
           </div>
 
           <div>

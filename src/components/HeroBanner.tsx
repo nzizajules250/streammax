@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Movie, UserProfile } from '../types';
 import { Play, Plus, Check, Info, Volume2, VolumeX } from 'lucide-react';
-import { db } from '../lib/firebase';
-import { collection, query, where, onSnapshot, addDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import { motion } from 'motion/react';
 
 interface HeroBannerProps {
@@ -11,44 +9,21 @@ interface HeroBannerProps {
   onPlay?: (movie: Movie) => void;
   onOpenDetails?: (movie: Movie) => void;
   onAuthRequired?: () => void;
+  onToggleList?: (movie: Movie) => void;
+  inList?: boolean;
   isLoading?: boolean;
 }
 
 const getBackgroundVideoUrl = (movie?: Movie) => {
   if (!movie) return '';
-  return movie.videoUrl || movie.videoUrl || '';
+  return movie.videoUrl || '';
 };
 
-export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAuthRequired, isLoading = false }: HeroBannerProps) {
-  const [inList, setInList] = useState(false);
+export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAuthRequired, onToggleList, inList = false, isLoading = false }: HeroBannerProps) {
   const [isMuted, setIsMuted] = useState(true);
-  const [loadingList, setLoadingList] = useState(true);
   const [videoReady, setVideoReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Synchronise watchlist from Firestore
-  useEffect(() => {
-    if (!profile || profile.id === 'guest' || !movie) {
-      setInList(false);
-      setLoadingList(false);
-      return;
-    }
-    const q = query(
-      collection(db, 'watchlist'),
-      where('profileId', '==', profile.id),
-      where('movieId', '==', movie.id)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setInList(!snapshot.empty);
-      setLoadingList(false);
-    });
-
-    return () => unsubscribe();
-  }, [profile?.id, movie?.id]);
-
-  // Reset video-ready state whenever we get a new movie, then force play as a fallback
-  // for browsers that ignore the autoPlay attribute on async-loaded <video> elements.
   useEffect(() => {
     setVideoReady(false);
     const el = videoRef.current;
@@ -57,39 +32,21 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
 
     const tryPlay = () => {
       el.play().catch(() => {
-        // Autoplay was blocked (e.g. browser policy) — leave the poster showing.
-        // The mute toggle button still lets the user start it manually if needed.
+        // Autoplay may be blocked; the user can still click play.
       });
     };
 
     tryPlay();
   }, [movie?.id, movie?.videoUrl]);
 
-  const handleToggleList = async () => {
-    if (!profile || profile.id === 'guest' || !movie) {
+  const handleToggleList = () => {
+    if (!movie) return;
+    if (!profile || profile.id === 'guest') {
       if (onAuthRequired) onAuthRequired();
       return;
     }
-    try {
-      const q = query(
-        collection(db, 'watchlist'),
-        where('profileId', '==', profile.id),
-        where('movieId', '==', movie.id)
-      );
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        await addDoc(collection(db, 'watchlist'), {
-          profileId: profile.id,
-          movieId: movie.id,
-          addedAt: Date.now()
-        });
-      } else {
-        const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(deletePromises);
-      }
-    } catch (error) {
-      console.error('Error toggling watchlist:', error);
+    if (onToggleList) {
+      onToggleList(movie);
     }
   };
 
@@ -196,7 +153,7 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
             <span>Play</span>
           </button>
 
-          <button
+              <button
             onClick={handleToggleList}
             className={`flex items-center justify-center gap-2 px-5 md:px-6 py-2 md:py-3 border ${
               inList
@@ -205,7 +162,7 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
             } font-semibold text-xs md:text-sm rounded-md transition-all shadow-md cursor-pointer`}
           >
             {inList ? <Check className="w-4 h-4 md:w-5 md:h-5" /> : <Plus className="w-4 h-4 md:w-5 md:h-5" />}
-            <span>My List</span>
+            <span>{inList ? 'In My List' : 'My List'}</span>
           </button>
 
           <button

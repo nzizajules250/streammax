@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Film, Loader2, PlusCircle, Trash2, PencilLine } from 'lucide-react';
+import { Film, Loader2, PlusCircle, Trash2, PencilLine, Users, Crown, Database } from 'lucide-react';
 import { Movie } from '../types';
+import { fetchAdminStats } from '../lib/api';
 
 interface MovieFormState {
   title: string;
@@ -47,11 +48,14 @@ export default function AdminCMSPage() {
   }
 
   const [movies, setMovies] = useState<Movie[]>([]);
+  const [stats, setStats] = useState<{ movies: number; users: number; subscriptions: number }>({ movies: 0, users: 0, subscriptions: 0 });
   const [form, setForm] = useState<MovieFormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  // const [stats, setStats] = useState({ movies: 0, users: 0, subscriptions: 0 });
 
   const loadMovies = async () => {
     setLoading(true);
@@ -69,6 +73,13 @@ export default function AdminCMSPage() {
 
   useEffect(() => {
     loadMovies();
+    if (adminToken) {
+      setStatsLoading(true);
+      fetchAdminStats(adminToken)
+        .then((data) => setStats(data.stats || { movies: 0, users: 0, subscriptions: 0 }))
+        .catch(() => setStats({ movies: 0, users: 0, subscriptions: 0 }))
+        .finally(() => setStatsLoading(false));
+    }
   }, []);
 
   const resetForm = () => {
@@ -178,6 +189,20 @@ export default function AdminCMSPage() {
     <div className="min-h-screen bg-zinc-950 p-6 text-white">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
         <div className="rounded-3xl border border-zinc-800 bg-zinc-900/80 p-6 shadow-2xl">
+          <div className="mb-5 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+              <div className="mb-2 flex items-center gap-2 text-red-400"><Film className="h-4 w-4" /> <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Catalog</span></div>
+              <div className="text-2xl font-black text-white">{stats.movies}</div>
+            </div>
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+              <div className="mb-2 flex items-center gap-2 text-emerald-400"><Users className="h-4 w-4" /> <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Users</span></div>
+              <div className="text-2xl font-black text-white">{stats.users}</div>
+            </div>
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+              <div className="mb-2 flex items-center gap-2 text-amber-400"><Crown className="h-4 w-4" /> <span className="text-xs uppercase tracking-[0.2em] text-zinc-500">Premium</span></div>
+              <div className="text-2xl font-black text-white">{stats.subscriptions}</div>
+            </div>
+          </div>
           <div className="mb-4 flex items-center gap-3 text-red-500">
             <Film className="h-8 w-8" />
             <div>
@@ -195,6 +220,21 @@ export default function AdminCMSPage() {
                 <h2 className="text-lg font-semibold">{title}</h2>
                 <p className="text-sm text-zinc-500">Manage movie records and publish updates for your streaming library.</p>
               </div>
+              <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-3">
+                <div className="rounded-3xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-center">
+                  <p className="text-[11px] uppercase tracking-[0.35em] text-zinc-500">Movies</p>
+                  <p className="mt-2 text-2xl font-black text-white">{statsLoading ? '...' : stats.movies}</p>
+                </div>
+                <div className="rounded-3xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-center">
+                  <p className="text-[11px] uppercase tracking-[0.35em] text-zinc-500">Users</p>
+                  <p className="mt-2 text-2xl font-black text-white">{statsLoading ? '...' : stats.users}</p>
+                </div>
+                <div className="rounded-3xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-center">
+                  <p className="text-[11px] uppercase tracking-[0.35em] text-zinc-500">Premium</p>
+                  <p className="mt-2 text-2xl font-black text-white">{statsLoading ? '...' : stats.subscriptions}</p>
+                </div>
+              </div>
+            </div>
               <div className="flex items-center gap-3">
                 <button onClick={resetForm} className="rounded-full border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300">New</button>
                 <button onClick={handleLogout} className="rounded-full border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-700">Logout</button>
@@ -320,6 +360,5 @@ export default function AdminCMSPage() {
           </div>
         </div>
       </div>
-    </div>
   );
 }

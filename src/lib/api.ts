@@ -59,6 +59,21 @@ export async function fetchMovies() {
   return request<{ success: boolean; movies: any[] }>('/api/movies', { method: 'GET' });
 }
 
+export async function fetchSubscriptionStatus(token?: string) {
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return request<{ success: boolean; subscription: any }>('/api/subscriptions/me', { method: 'GET', headers });
+}
+
+export async function fetchAdminStats(adminToken: string) {
+  return request<{ success: boolean; stats: { movies: number; users: number; subscriptions: number } }>('/api/admin/stats', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+}
+
 export async function createMovie(movie: any, adminToken: string) {
   return request<{ success: boolean; movie: any }>('/api/movies', {
     method: 'POST',

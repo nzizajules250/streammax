@@ -12,9 +12,9 @@ import MovieDetailModal from './components/MovieDetailModal';
 import VideoPlayer from './components/VideoPlayer';
 import { 
   Search, Bell, ChevronDown, Sparkles, Wifi, WifiOff, HelpCircle, X, List, Compass, 
-  Film, LogOut, Check, ArrowRight, ShieldAlert, CreditCard, Download, Trash2
+  Film, LogOut, Check, ArrowRight, ShieldAlert, CreditCard, Download, Trash2, Crown
 } from 'lucide-react';
-import { initializeSubscriptionCheckout } from './lib/api';
+import { fetchMovies, initializeSubscriptionCheckout } from './lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 
 const GUEST_PROFILE: UserProfile = {
@@ -94,12 +94,15 @@ export default function App() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [showToast, setShowToast] = useState<string | null>(null);
 
+  const resolveMovieById = (movieId: string) => {
+    return movies.find((movie) => movie.id === movieId) ?? MOVIES.find((movie) => movie.id === movieId) ?? null;
+  };
+
   useEffect(() => {
     const loadMovies = async () => {
       try {
-        const response = await fetch('/api/movies');
-        const data = await response.json();
-        if (response.ok && Array.isArray(data.movies)) {
+        const data = await fetchMovies();
+        if (Array.isArray(data.movies)) {
           setMovies(data.movies);
         }
       } catch (error) {
@@ -115,7 +118,7 @@ export default function App() {
     const urlParams = new URLSearchParams(window.location.search);
     const watchId = urlParams.get('watch');
     if (watchId) {
-      const target = MOVIES.find(m => m.id === watchId);
+      const target = resolveMovieById(watchId);
       if (target) {
         setSelectedMovie(target);
       }
@@ -139,7 +142,27 @@ export default function App() {
       return;
     }
 
-    const syncSub = () => {
+    const syncSub = async () => {
+      try {
+        const token = localStorage.getItem('netflix_auth_token');
+        const response = await fetch('/api/subscriptions/me', {
+          headers: { Authorization: `Bearer ${token || ''}` },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok && data.subscription) {
+          setSubscription({
+            isPremium: Boolean(data.subscription.isPremium && data.subscription.expiresAt > Date.now()),
+            txRef: data.subscription.txRef || '',
+            transactionId: data.subscription.transactionId || '',
+            subscribedAt: data.subscription.subscribedAt || 0,
+            expiresAt: data.subscription.expiresAt || 0,
+          });
+          return;
+        }
+      } catch (error) {
+        console.warn('Unable to sync subscription from backend.', error);
+      }
+
       const subKey = `subscription_${authUser.uid}`;
       const saved = localStorage.getItem(subKey);
       if (saved) {
@@ -157,7 +180,7 @@ export default function App() {
     };
 
     syncSub();
-    const interval = setInterval(syncSub, 1500);
+    const interval = setInterval(syncSub, 10000);
     return () => clearInterval(interval);
   }, [authUser]);
 
@@ -200,7 +223,7 @@ export default function App() {
         progressList.forEach((item) => {
           const progressVal = item.progress || 0;
           if (progressVal > 0 && progressVal < 95) {
-            const matchedMovie = MOVIES.find(m => m.id === item.movieId);
+            const matchedMovie = resolveMovieById(item.movieId);
             if (matchedMovie) {
               list.push({
                 movie: matchedMovie,
@@ -314,6 +337,23 @@ export default function App() {
     handleLogoutProfile();
   };
 
+  const handleToggleWatchlist = (movie: Movie) => {
+    if (currentProfile?.id === 'guest' || !currentProfile) {
+      setForceAuthScreen(true);
+      return;
+    }
+
+    const listKey = `watchlist_${currentProfile.id}`;
+    const saved = localStorage.getItem(listKey);
+    const currentList = saved ? (JSON.parse(saved) as string[]) : [];
+    const updated = currentList.includes(movie.id)
+      ? currentList.filter((id) => id !== movie.id)
+      : [...currentList, movie.id];
+    localStorage.setItem(listKey, JSON.stringify(updated));
+    setWatchlistMovieIds(updated);
+    setShowToast(updated.includes(movie.id) ? 'Added to My List' : 'Removed from My List');
+  };
+
   const handleInitiateCheckout = async () => {
     if (!authUser) {
       setShowToast('Please log in to access premium features.');
@@ -362,10 +402,12 @@ export default function App() {
     setNotifications(updated);
   };
 
+  const movieCatalog = movies.length > 0 ? movies : MOVIES;
+
   // Movie collections filter
-  let baseMovies = movies;
+  let baseMovies = movieCatalog;
   if (isOfflineMode && activeProfile) {
-    baseMovies = MOVIES.filter(m => downloadedMovieIds.includes(m.id));
+    baseMovies = movieCatalog.filter(m => downloadedMovieIds.includes(m.id));
   }
 
   const trendingMovies = baseMovies.filter(m => m.isTrending);
@@ -388,7 +430,7 @@ export default function App() {
     );
   });
 
-  const featuredMovie = baseMovies[0] || MOVIES[0];
+  const featuredMovie = baseMovies[0] || movieCatalog[0] || MOVIES[0];
 
   // Loaders
   if (authLoading) {
@@ -571,13 +613,23 @@ export default function App() {
       >
         <div className="flex items-center gap-4 md:gap-8">
           <span className="text-xl md:text-2xl font-black tracking-tighter text-red-600 uppercase font-sans cursor-pointer">
-            NETFLIX
+            Stream Max
           </span>
 
           <nav className="hidden lg:flex items-center gap-6 text-xs md:text-sm text-neutral-300 font-medium">
             <button className="hover:text-neutral-400 transition-colors cursor-pointer text-white font-bold">Home</button>
             <button className="hover:text-neutral-400 transition-colors cursor-pointer">TV Shows</button>
             <button className="hover:text-neutral-400 transition-colors cursor-pointer">Movies</button>
+            <button
+              onClick={() => {
+                const adminPath = window.location.pathname === '/admin' ? '/' : '/admin';
+                window.location.href = adminPath;
+              }}
+              className="hover:text-neutral-400 transition-colors cursor-pointer flex items-center gap-1"
+            >
+              <ShieldAlert className="h-3.5 w-3.5 text-amber-400" />
+              <span>Admin</span>
+            </button>
             <button 
               onClick={() => {
                 const listRow = document.getElementById('my-list-section');
@@ -715,6 +767,12 @@ export default function App() {
               Sign In
             </button>
           ) : (
+            <div className="flex items-center gap-2">
+              {subscription?.isPremium ? (
+                <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-400">
+                  <Crown className="h-3 w-3" /> Premium
+                </span>
+              ) : null}
             <div className="relative">
               <button
                 onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
@@ -757,7 +815,8 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
-          )}
+          </div>
+        )}
         </div>
       </header>
 
@@ -824,6 +883,8 @@ export default function App() {
               onPlay={handlePlayMovieTrigger}
               onOpenDetails={setSelectedMovie}
               onAuthRequired={handleAuthRequired}
+              onToggleList={handleToggleWatchlist}
+              inList={watchlistMovieIds.includes(featuredMovie.id)}
               isLoading={isContentLoading}
             />
 
