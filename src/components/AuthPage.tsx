@@ -60,7 +60,7 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
     setError('');
 
     try {
-      const verified = await verifyVerificationCode(email, code);
+const verified = await verifyVerificationCode(email, code, name.trim());
       if (!verified.success) {
         throw new Error(verified.message || 'Verification failed.');
       }
@@ -86,7 +86,7 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
         <div className="mb-6 flex items-center gap-3 text-red-500">
           <Film className="h-8 w-8" />
           <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Netflix Studio</p>
+            <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Stream Max</p>
             <h1 className="text-xl font-black">{title}</h1>
           </div>
         </div>

@@ -272,8 +272,10 @@ export default function VideoPlayer({ movie, profile, isPremium, onClose, onSubs
       <video
         ref={videoRef}
         src={movie.videoUrl || getMuxPlaybackUrl(movie.muxPlaybackId)}
+        crossOrigin="anonymous"
         autoPlay
         playsInline
+        preload="auto"
         onTimeUpdate={handleTimeUpdate}
         className="w-full h-full object-contain cursor-none"
         onClick={handlePlayPause}

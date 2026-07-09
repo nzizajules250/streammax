@@ -19,7 +19,7 @@ const __cwd = process.cwd();
 const { Pool } = pkg;
 const pgPool = process.env.DATABASE_URL || process.env.POSTGRES_URL ? new Pool({ connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL }) : null;
 const mux = process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET ? new Mux({ tokenId: process.env.MUX_TOKEN_ID, tokenSecret: process.env.MUX_TOKEN_SECRET }) : null;
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const resend = process.env.RESEND_API_KEY ?  new Resend('re_W7eRvHRf_Gzf3NpJdZGcRnTFFw5b9RbMi') : null ;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret';
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'dev_admin_jwt_secret';
@@ -83,6 +83,8 @@ interface MovieRecord {
   videoUrl: string;
   trailerUrl?: string;
   category: string;
+  mediaType?: string;
+  seriesCount?: number;
   rating: number;
   releaseYear: number;
   duration: string;
@@ -93,6 +95,7 @@ interface MovieRecord {
   isPopular?: boolean;
   trendingRank?: number;
   muxPlaybackId?: string;
+  episodeUrls?: string[];
 }
 
 const movieStore = new Map<string, MovieRecord>();
@@ -139,12 +142,43 @@ const DEFAULT_MOVIES: Array<Omit<MovieRecord, 'id'>> = [
     posterUrl: 'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=800&q=80',
     videoUrl: 'https://www.w3schools.com/html/movie.mp4',
     category: 'New Releases',
+    mediaType: 'Movie',
+    seriesCount: 0,
     rating: 4.7,
     releaseYear: 2026,
     duration: '2h 14m',
     ageRating: 'R',
     genres: ['Action', 'Adventure'],
     cast: ['Darius Hall', 'Nina Sol'],
+    isPopular: true,
+  },
+  {
+    title: 'Neon Protocol',
+    synopsis: 'A covert cyber team tracks a digital ghost across nine episodes of corporate espionage.',
+    backdropUrl: 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=80',
+    posterUrl: 'https://images.unsplash.com/photo-1497032628192-86f99bcd76bc?auto=format&fit=crop&w=800&q=80',
+    videoUrl: 'https://www.w3schools.com/html/mov_bbb.mp4',
+    category: 'TV Series',
+    mediaType: 'TV Series',
+    seriesCount: 9,
+    episodeUrls: [
+      'https://www.w3schools.com/html/mov_bbb.mp4',
+      'https://www.w3schools.com/html/movie.mp4',
+      'https://www.w3schools.com/html/mov_bbb.mp4',
+      'https://www.w3schools.com/html/movie.mp4',
+      'https://www.w3schools.com/html/mov_bbb.mp4',
+      'https://www.w3schools.com/html/movie.mp4',
+      'https://www.w3schools.com/html/mov_bbb.mp4',
+      'https://www.w3schools.com/html/movie.mp4',
+      'https://www.w3schools.com/html/mov_bbb.mp4',
+    ],
+    rating: 4.5,
+    releaseYear: 2026,
+    duration: '9 Episodes',
+    ageRating: 'TV-14',
+    genres: ['Sci-Fi', 'Thriller'],
+    cast: ['Riley Stone', 'Mina Kade', 'Jonas Finch'],
+    isTrending: true,
     isPopular: true,
   },
 ];
@@ -182,6 +216,9 @@ async function ensureDatabaseSchema() {
       poster_url TEXT,
       video_url TEXT,
       category TEXT,
+      media_type TEXT,
+      series_count INT,
+      episode_urls TEXT[],
       rating NUMERIC,
       release_year INT,
       duration TEXT,
@@ -237,9 +274,9 @@ async function seedStarterMovies() {
     for (const movie of DEFAULT_MOVIES) {
       const movieId = `m_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       await pgPool.query(
-        `INSERT INTO movies(id, title, synopsis, backdrop_url, poster_url, video_url, category, rating, release_year, duration, age_rating, genres, "cast", is_trending, is_popular, mux_playback_id, trailer_url)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-        [movieId, movie.title, movie.synopsis, movie.backdropUrl, movie.posterUrl, movie.videoUrl, movie.category, movie.rating, movie.releaseYear, movie.duration, movie.ageRating, movie.genres, movie.cast, movie.isTrending, movie.isPopular, movie.muxPlaybackId || null, movie.trailerUrl || null]
+        `INSERT INTO movies(id, title, synopsis, backdrop_url, poster_url, video_url, category, media_type, series_count, episode_urls, rating, release_year, duration, age_rating, genres, "cast", is_trending, is_popular, mux_playback_id, trailer_url)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+        [movieId, movie.title, movie.synopsis, movie.backdropUrl, movie.posterUrl, movie.videoUrl, movie.category, movie.mediaType || null, movie.seriesCount || 0, movie.episodeUrls || null, movie.rating, movie.releaseYear, movie.duration, movie.ageRating, movie.genres, movie.cast, movie.isTrending, movie.isPopular, movie.muxPlaybackId || null, movie.trailerUrl || null]
       );
     }
   } catch (error) {
@@ -351,6 +388,9 @@ app.get('/api/movies', async (req, res) => {
         videoUrl: row.video_url || '',
         trailerUrl: row.trailer_url || '',
         category: row.category || 'New Releases',
+        mediaType: row.media_type || 'Movie',
+        seriesCount: Number(row.series_count || 0),
+        episodeUrls: row.episode_urls || [],
         rating: Number(row.rating || 4.7),
         releaseYear: Number(row.release_year || 2026),
         duration: row.duration || '2h 10m',
@@ -392,25 +432,22 @@ app.post('/api/movies', verifyAdminToken, async (req, res) => {
     videoUrl,
     trailerUrl,
     category: payload.category || 'New Releases',
-    rating: Number(payload.rating) || 4.7,
-    releaseYear: Number(payload.releaseYear) || 2026,
-    duration: payload.duration || '2h 10m',
-    ageRating: payload.ageRating || 'PG-13',
-    genres: Array.isArray(payload.genres) ? payload.genres : [],
-    cast: Array.isArray(payload.cast) ? payload.cast : [],
-    isTrending: Boolean(payload.isTrending),
-    isPopular: Boolean(payload.isPopular),
-    muxPlaybackId,
-  };
-
+    mediaType: payload.mediaType || 'Movie',
+    seriesCount: Number(payload.seriesCount) || 0,
+    episodeUrls: Array.isArray(payload.episodeUrls)
+      ? payload.episodeUrls.filter(Boolean)
+      : typeof payload.episodeUrls === 'string'
+      ? String(payload.episodeUrls).split('\n').map((url: string) => url.trim()).filter(Boolean)
+      : [],
+    }
   movieStore.set(movie.id, movie);
 
   if (pgPool) {
     try {
       await pgPool.query(
-        `INSERT INTO movies(id, title, synopsis, backdrop_url, poster_url, video_url, category, rating, release_year, duration, age_rating, genres, "cast", is_trending, is_popular, mux_playback_id, trailer_url)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-        [movie.id, movie.title, movie.synopsis, movie.backdropUrl, movie.posterUrl, movie.videoUrl, movie.category, movie.rating, movie.releaseYear, movie.duration, movie.ageRating, movie.genres, movie.cast, movie.isTrending, movie.isPopular, movie.muxPlaybackId || null, movie.trailerUrl || null]
+        `INSERT INTO movies(id, title, synopsis, backdrop_url, poster_url, video_url, category, media_type, series_count, rating, release_year, duration, age_rating, genres, "cast", is_trending, is_popular, mux_playback_id, trailer_url)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        [movie.id, movie.title, movie.synopsis, movie.backdropUrl, movie.posterUrl, movie.videoUrl, movie.category, movie.mediaType || null, movie.seriesCount || 0, movie.episodeUrls || null, movie.rating, movie.releaseYear, movie.duration, movie.ageRating, movie.genres, movie.cast, movie.isTrending, movie.isPopular, movie.muxPlaybackId || null, movie.trailerUrl || null]
       );
     } catch (error: any) {
       console.error('Postgres movie insert error:', error.message);
@@ -436,6 +473,13 @@ app.put('/api/movies/:id', verifyAdminToken, async (req, res) => {
     videoUrl: payload.videoUrl || existing.videoUrl,
     trailerUrl: payload.trailerUrl || existing.trailerUrl || '',
     category: payload.category || existing.category,
+    mediaType: payload.mediaType || existing.mediaType || 'Movie',
+    seriesCount: Number(payload.seriesCount) || existing.seriesCount || 0,
+    episodeUrls: Array.isArray(payload.episodeUrls)
+      ? payload.episodeUrls.filter(Boolean)
+      : typeof payload.episodeUrls === 'string'
+      ? String(payload.episodeUrls).split('\n').map((url: string) => url.trim()).filter(Boolean)
+      : existing.episodeUrls || [],
     rating: Number(payload.rating) || existing.rating,
     releaseYear: Number(payload.releaseYear) || existing.releaseYear,
     duration: payload.duration || existing.duration,
@@ -451,8 +495,8 @@ app.put('/api/movies/:id', verifyAdminToken, async (req, res) => {
   if (pgPool) {
     try {
       await pgPool.query(
-        `UPDATE movies SET title=$2, synopsis=$3, backdrop_url=$4, poster_url=$5, video_url=$6, category=$7, rating=$8, release_year=$9, duration=$10, age_rating=$11, genres=$12, "cast"=$13, is_trending=$14, is_popular=$15, mux_playback_id=$16, trailer_url=$17 WHERE id=$1`,
-        [movieId, updated.title, updated.synopsis, updated.backdropUrl, updated.posterUrl, updated.videoUrl, updated.category, updated.rating, updated.releaseYear, updated.duration, updated.ageRating, updated.genres, updated.cast, updated.isTrending, updated.isPopular, updated.muxPlaybackId || null, updated.trailerUrl || null]
+        `UPDATE movies SET title=$2, synopsis=$3, backdrop_url=$4, poster_url=$5, video_url=$6, category=$7, media_type=$8, series_count=$9, episode_urls=$10, rating=$11, release_year=$12, duration=$13, age_rating=$14, genres=$15, "cast"=$16, is_trending=$17, is_popular=$18, mux_playback_id=$19, trailer_url=$20 WHERE id=$1`,
+        [movieId, updated.title, updated.synopsis, updated.backdropUrl, updated.posterUrl, updated.videoUrl, updated.category, updated.mediaType || null, updated.seriesCount || 0, updated.episodeUrls || null, updated.rating, updated.releaseYear, updated.duration, updated.ageRating, updated.genres, updated.cast, updated.isTrending, updated.isPopular, updated.muxPlaybackId || null, updated.trailerUrl || null]
       );
     } catch (error: any) {
       console.error('Postgres movie update error:', error.message);

@@ -77,7 +77,7 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
   }
 
   return (
-    <div className="relative h-[55vh] md:h-[80vh] w-full overflow-hidden select-none bg-black">
+    <div className="relative h-screen min-h-[100vh] w-full overflow-hidden select-none bg-black">
       {/* Background: poster shows first, video crossfades in once it can actually play */}
       <div className="absolute inset-0">
         {/* Poster image, always present as a fallback / while video buffers */}

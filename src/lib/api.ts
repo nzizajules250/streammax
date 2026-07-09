@@ -35,10 +35,10 @@ export async function sendVerificationCode(email: string) {
   });
 }
 
-export async function verifyVerificationCode(email: string, code: string) {
+export async function verifyVerificationCode(email: string, code: string, name?: string) {
   return request<{ success: boolean; message: string; token?: string; user?: { uid: string; email: string; displayName: string } }>('/api/auth/verify-code', {
     method: 'POST',
-    body: JSON.stringify({ email, code }),
+    body: JSON.stringify({ email, code, name }),
   });
 }
 

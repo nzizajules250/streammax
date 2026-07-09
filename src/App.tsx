@@ -10,6 +10,11 @@ import HeroBanner from './components/HeroBanner';
 import MovieRow from './components/MovieRow';
 import MovieDetailModal from './components/MovieDetailModal';
 import VideoPlayer from './components/VideoPlayer';
+import LandingPage from './pages/LandingPage';
+import ProfilePage from './pages/ProfilePage';
+import MoviesPage from './pages/MoviesPage';
+import TVShowsPage from './pages/TVShowsPage';
+import logoUrl from './assets/logo.svg';
 import { 
   Search, Bell, ChevronDown, Sparkles, Wifi, WifiOff, HelpCircle, X, List, Compass, 
   Film, LogOut, Check, ArrowRight, ShieldAlert, CreditCard, Download, Trash2, Crown
@@ -46,7 +51,7 @@ const DEFAULT_NOTIFICATIONS: InAppNotification[] = [
 ];
 
 export default function App() {
-  const pathname = window.location.pathname;
+    const [pagePath, setPagePath] = useState(window.location.pathname || '/');
 
   // 2. Client-side Authentication state
   const [authUser, setAuthUser] = useState<{ uid: string; email: string; displayName: string } | null>(() => {
@@ -93,6 +98,20 @@ export default function App() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [showToast, setShowToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handlePopState = () => setPagePath(window.location.pathname || '/');
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigate = (path: string) => {
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    setPagePath(path);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const resolveMovieById = (movieId: string) => {
     return movies.find((movie) => movie.id === movieId) ?? MOVIES.find((movie) => movie.id === movieId) ?? null;
@@ -403,6 +422,12 @@ export default function App() {
   };
 
   const movieCatalog = movies.length > 0 ? movies : MOVIES;
+  const currentProfile = authUser ? activeProfile ?? GUEST_PROFILE : GUEST_PROFILE;
+
+  // If the user is signed in but has not selected a profile yet, force profile selection.
+  if (authUser && !activeProfile && pagePath !== '/auth' && pagePath !== '/admin' && pagePath !== '/cms' && pagePath !== '/payment-simulator') {
+    return <ProfileSelector userId={authUser.uid} onSelect={handleSelectProfile} />;
+  }
 
   // Movie collections filter
   let baseMovies = movieCatalog;
@@ -442,34 +467,74 @@ export default function App() {
     );
   }
 
-  if (pathname === '/payment-simulator') {
+  if (pagePath === '/payment-simulator') {
     return <PaymentSimulator />;
   }
 
   // Auth Guard & Force Auth
-  if (pathname === '/auth' && !authUser) {
+  if (pagePath === '/auth' && !authUser) {
     return <AuthPage onClose={() => setForceAuthScreen(false)} onLoginSuccess={(u) => setAuthUser(u)} />;
   }
 
-  if (pathname === '/cms') {
+  if (pagePath === '/cms') {
     return <AdminCMSPage />;
   }
 
-  if (pathname === '/admin') {
+  if (pagePath === '/admin') {
     const adminToken = typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
     return adminToken ? <AdminCMSPage /> : <AdminAuthPage />;
+  }
+
+  if (pagePath === '/profile') {
+    if (!authUser) {
+      return <AuthPage onClose={() => setForceAuthScreen(false)} onLoginSuccess={(u) => setAuthUser(u)} />;
+    }
+    return (
+      <ProfilePage
+        authUser={authUser}
+        profile={currentProfile}
+        subscription={subscription}
+        movies={movieCatalog}
+        watchlistMovieIds={watchlistMovieIds}
+        continueWatchingMovies={continueWatchingMovies}
+        onNavigate={navigate}
+        onPlay={handlePlayMovieTrigger}
+        onOpenDetails={setSelectedMovie}
+        onAuthRequired={handleAuthRequired}
+        onSignOut={handleSignOutUser}
+      />
+    );
+  }
+
+  if (pagePath === '/movies') {
+    return (
+      <MoviesPage
+        movies={movieCatalog}
+        profile={currentProfile}
+        onPlay={handlePlayMovieTrigger}
+        onOpenDetails={setSelectedMovie}
+        onAuthRequired={handleAuthRequired}
+        onNavigate={navigate}
+      />
+    );
+  }
+
+  if (pagePath === '/tv-shows') {
+    return (
+      <TVShowsPage
+        movies={movieCatalog}
+        profile={currentProfile}
+        onPlay={handlePlayMovieTrigger}
+        onOpenDetails={setSelectedMovie}
+        onAuthRequired={handleAuthRequired}
+        onNavigate={navigate}
+      />
+    );
   }
 
   if (forceAuthScreen && !authUser) {
     return <AuthPage onClose={() => setForceAuthScreen(false)} onLoginSuccess={(u) => setAuthUser(u)} />;
   }
-
-  // Profile Selection Guard (only applies to authenticated users)
-  if (authUser && !activeProfile) {
-    return <ProfileSelector userId={authUser.uid} onSelect={handleSelectProfile} />;
-  }
-
-  const currentProfile = authUser ? activeProfile! : GUEST_PROFILE;
 
   return (
     <div className="min-h-screen bg-[#141414] text-white font-sans antialiased overflow-x-hidden select-none">
@@ -607,43 +672,32 @@ export default function App() {
 
       {/* Global Navbar */}
       <header
-        className={`fixed top-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-6xl rounded-2xl border transition-all duration-300 flex items-center justify-between px-6 py-2.5 backdrop-blur-md ${
+        className={`fixed top-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-6xl rounded-2xl border transition-all duration-300 flex items-center justify-between px-6 py-3 backdrop-blur-md ${
           isScrolled ? 'bg-black/90 border-neutral-800/80 shadow-2xl shadow-black/60' : 'bg-black/50 border-neutral-800/30 shadow-lg'
         }`}
       >
-        <div className="flex items-center gap-4 md:gap-8">
-          <span className="text-xl md:text-2xl font-black tracking-tighter text-red-600 uppercase font-sans cursor-pointer">
-            Stream Max
-          </span>
+        <div className="flex items-center gap-4 md:gap-6">
+          <button onClick={() => navigate('/')} className="flex items-center gap-3">
+            <img src={logoUrl} alt="Stream Max" className="h-10 w-10 rounded-2xl border border-zinc-800 bg-black" />
+            <span className="text-lg md:text-xl font-black tracking-tighter text-white uppercase font-sans">Stream Max</span>
+          </button>
 
-          <nav className="hidden lg:flex items-center gap-6 text-xs md:text-sm text-neutral-300 font-medium">
-            <button className="hover:text-neutral-400 transition-colors cursor-pointer text-white font-bold">Home</button>
-            <button className="hover:text-neutral-400 transition-colors cursor-pointer">TV Shows</button>
-            <button className="hover:text-neutral-400 transition-colors cursor-pointer">Movies</button>
+          <nav className="hidden lg:flex items-center gap-5 text-xs md:text-sm text-neutral-300 font-medium">
+            <button onClick={() => navigate('/')} className="hover:text-white transition-colors">Home</button>
+            <button onClick={() => navigate('/tv-shows')} className="hover:text-white transition-colors">TV Shows</button>
+            <button onClick={() => navigate('/movies')} className="hover:text-white transition-colors">Movies</button>
             <button
-              onClick={() => {
-                const adminPath = window.location.pathname === '/admin' ? '/' : '/admin';
-                window.location.href = adminPath;
-              }}
-              className="hover:text-neutral-400 transition-colors cursor-pointer flex items-center gap-1"
+              onClick={() => navigate('/profile')}
+              className="hover:text-white transition-colors"
+            >
+              Profile
+            </button>
+            <button
+              onClick={() => navigate('/admin')}
+              className="hover:text-white transition-colors flex items-center gap-1"
             >
               <ShieldAlert className="h-3.5 w-3.5 text-amber-400" />
               <span>Admin</span>
-            </button>
-            <button 
-              onClick={() => {
-                const listRow = document.getElementById('my-list-section');
-                if (listRow) {
-                  listRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-              }}
-              className="hover:text-neutral-400 transition-colors cursor-pointer"
-            >
-              My List
-            </button>
-            <button className="hover:text-neutral-400 transition-colors cursor-pointer flex items-center gap-1">
-              <Sparkles className="h-3.5 w-3.5 text-red-500 animate-pulse" />
-              <span>Recommendations</span>
             </button>
           </nav>
         </div>
@@ -978,18 +1032,48 @@ export default function App() {
       </div>
 
       {/* Footer Branding */}
-      <footer className="text-center py-12 text-xs text-neutral-500 font-mono border-t border-neutral-900 bg-neutral-950 px-4 space-y-4">
-        <div className="flex flex-wrap justify-center gap-6 text-[11px] text-neutral-400 font-medium">
-          <a href="#" className="hover:underline">Audio Description</a>
-          <a href="#" className="hover:underline">Help Center</a>
-          <a href="#" className="hover:underline">Gift Cards</a>
-          <a href="#" className="hover:underline">Media Center</a>
-          <a href="#" className="hover:underline">Investor Relations</a>
-          <a href="#" className="hover:underline">Terms of Use</a>
-          <a href="#" className="hover:underline">Privacy Statement</a>
+      <footer className="border-t border-neutral-900 bg-[#090909] text-white/80 py-14 px-6">
+        <div className="mx-auto flex max-w-6xl flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-3">
+              <img src={logoUrl} alt="Stream Max" className="h-10 w-10 rounded-2xl bg-black p-2" />
+              <div>
+                <p className="text-sm font-black uppercase tracking-[0.4em] text-white">Stream Max</p>
+                <p className="text-xs text-zinc-500">Premium streaming admin and content experience.</p>
+              </div>
+            </div>
+            <p className="max-w-md text-sm text-zinc-400">Enjoy seamless content discovery, TV series management, and multi-profile support with an advanced streaming experience built for modern media businesses.</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
+            <div>
+              <h3 className="text-xs uppercase tracking-[0.35em] text-zinc-500">Browse</h3>
+              <ul className="mt-4 space-y-2 text-sm text-zinc-400">
+                <li className="hover:text-white cursor-pointer" onClick={() => navigate('/')}>Home</li>
+                <li className="hover:text-white cursor-pointer" onClick={() => navigate('/movies')}>Movies</li>
+                <li className="hover:text-white cursor-pointer" onClick={() => navigate('/tv-shows')}>TV Shows</li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-xs uppercase tracking-[0.35em] text-zinc-500">Support</h3>
+              <ul className="mt-4 space-y-2 text-sm text-zinc-400">
+                <li>Help Center</li>
+                <li>Contact Sales</li>
+                <li>Privacy</li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="text-xs uppercase tracking-[0.35em] text-zinc-500">Company</h3>
+              <ul className="mt-4 space-y-2 text-sm text-zinc-400">
+                <li>About Us</li>
+                <li>Careers</li>
+                <li>Press</li>
+              </ul>
+            </div>
+          </div>
         </div>
-        <div className="font-semibold text-neutral-400 uppercase">REAL-TIME MULTI-PROFILE ENGINE SYNCHRONIZED SECURELY BY BROWSER STORAGE</div>
-        <div className="text-[10px] text-neutral-600">© {new Date().getFullYear()} Netflix Web Clone Premium Edition • Built with Antigravity Workspace</div>
+
+        <div className="mt-12 border-t border-neutral-900 pt-6 text-center text-[11px] text-neutral-600 uppercase tracking-[0.35em]">© {new Date().getFullYear()} Stream Max • Built for modern streaming operations.</div>
       </footer>
     </div>
   );

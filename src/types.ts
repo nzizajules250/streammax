@@ -7,6 +7,9 @@ export interface Movie {
   videoUrl: string;
   trailerUrl?: string;
   category: string;
+  mediaType?: string;
+  seriesCount?: number;
+  episodeUrls?: string[];
   rating: number; // e.g. 4.9
   releaseYear: number;
   duration: string; // e.g. '9 Episodes' or '2h 18m'
