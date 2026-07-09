@@ -13,6 +13,7 @@ interface MovieFormState {
   posterUrl: string;
   backdropUrl: string;
   videoUrl: string;
+  trailerUrl: string;
   genres: string;
   cast: string;
   isTrending: boolean;
@@ -30,6 +31,7 @@ const emptyForm: MovieFormState = {
   posterUrl: '',
   backdropUrl: '',
   videoUrl: '',
+  trailerUrl: '',
   genres: '',
   cast: '',
   isTrending: false,
@@ -74,6 +76,18 @@ export default function AdminCMSPage() {
     setEditingId(null);
   };
 
+  const handleLogout = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('admin_token');
+      window.location.href = '/admin';
+    }
+  };
+
+  const handleUnauthorized = () => {
+    setError('Session expired. Please log in again.');
+    handleLogout();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -92,6 +106,7 @@ export default function AdminCMSPage() {
         posterUrl: form.posterUrl,
         backdropUrl: form.backdropUrl,
         videoUrl: form.videoUrl,
+        trailerUrl: form.trailerUrl,
         genres: form.genres.split(',').map((item) => item.trim()).filter(Boolean),
         cast: form.cast.split(',').map((item) => item.trim()).filter(Boolean),
         isTrending: form.isTrending,
@@ -104,6 +119,10 @@ export default function AdminCMSPage() {
         body: JSON.stringify(payload),
       });
       const data = await response.json();
+      if (response.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       if (!response.ok) throw new Error(data.error || 'Unable to save movie');
       setSuccess(editingId ? 'Movie updated.' : 'Movie created.');
       resetForm();
@@ -120,6 +139,10 @@ export default function AdminCMSPage() {
     setSuccess('');
     const response = await fetch(`/api/movies/${movieId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${adminToken}` } });
     const data = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      handleUnauthorized();
+      return;
+    }
     if (!response.ok) {
       setError(data.error || 'Unable to delete movie');
       return;
@@ -141,6 +164,7 @@ export default function AdminCMSPage() {
       posterUrl: movie.posterUrl,
       backdropUrl: movie.backdropUrl,
       videoUrl: movie.videoUrl,
+      trailerUrl: movie.trailerUrl || '',
       genres: movie.genres.join(', '),
       cast: movie.cast.join(', '),
       isTrending: Boolean(movie.isTrending),
@@ -166,9 +190,15 @@ export default function AdminCMSPage() {
 
         <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="rounded-3xl border border-zinc-800 bg-zinc-900/80 p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">{title}</h2>
-              <button onClick={resetForm} className="rounded-full border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300">New</button>
+            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">{title}</h2>
+                <p className="text-sm text-zinc-500">Manage movie records and publish updates for your streaming library.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={resetForm} className="rounded-full border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300">New</button>
+                <button onClick={handleLogout} className="rounded-full border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-700">Logout</button>
+              </div>
             </div>
 
             {error ? <div className="mb-4 rounded-xl border border-red-900/60 bg-red-950/40 p-3 text-sm text-red-300">{error}</div> : null}
@@ -237,6 +267,11 @@ export default function AdminCMSPage() {
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">Backdrop URL</label>
                   <input value={form.backdropUrl} onChange={(e) => setForm({ ...form, backdropUrl: e.target.value })} className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm" />
                 </div>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">Trailer URL</label>
+                <input value={form.trailerUrl} onChange={(e) => setForm({ ...form, trailerUrl: e.target.value })} className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm" placeholder="https://..." />
               </div>
 
               <div className="flex gap-4">

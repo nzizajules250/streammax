@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Movie, UserProfile, SubtitleSettings } from '../types';
+import { getMuxPlaybackUrl } from '../lib/mux';
 import { 
   ArrowLeft, Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, Maximize2, Minimize2, 
   Settings, Sparkles, Sliders, Monitor, Globe, Check, Eye
@@ -270,7 +271,7 @@ export default function VideoPlayer({ movie, profile, isPremium, onClose, onSubs
       {/* Real HTML Video Component */}
       <video
         ref={videoRef}
-        src={movie.videoUrl}
+        src={movie.videoUrl || getMuxPlaybackUrl(movie.muxPlaybackId)}
         autoPlay
         playsInline
         onTimeUpdate={handleTimeUpdate}

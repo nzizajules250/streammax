@@ -5,6 +5,7 @@ export interface Movie {
   backdropUrl: string;
   posterUrl: string;
   videoUrl: string;
+  trailerUrl?: string;
   category: string;
   rating: number; // e.g. 4.9
   releaseYear: number;
@@ -15,6 +16,7 @@ export interface Movie {
   isTrending?: boolean;
   isPopular?: boolean;
   trendingRank?: number;
+  muxPlaybackId?: string;
 }
 
 export interface UserProfile {

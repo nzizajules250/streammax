@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { Resend } from 'resend';
 import pkg from 'pg';
+import Mux from '@mux/mux-node';
 
 // Load environment variables
 dotenv.config();
@@ -31,6 +32,7 @@ const db = getFirestore();
 const { Pool } = pkg;
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const pgPool = process.env.DATABASE_URL || process.env.POSTGRES_URL ? new Pool({ connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL }) : null;
+const mux = process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET ? new Mux({ tokenId: process.env.MUX_TOKEN_ID, tokenSecret: process.env.MUX_TOKEN_SECRET }) : null;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret';
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'dev_admin_jwt_secret';
@@ -57,7 +59,7 @@ const verifyAdminToken = (req: any, res: any, next: any) => {
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, ADMIN_JWT_SECRET);
     if (decoded.role !== 'admin') {
       return res.status(403).json({ error: 'Forbidden: Admin role required.' });
     }
@@ -165,6 +167,7 @@ interface MovieRecord {
   backdropUrl: string;
   posterUrl: string;
   videoUrl: string;
+  trailerUrl?: string;
   category: string;
   rating: number;
   releaseYear: number;
@@ -175,6 +178,7 @@ interface MovieRecord {
   isTrending?: boolean;
   isPopular?: boolean;
   trendingRank?: number;
+  muxPlaybackId?: string;
 }
 
 const movieStore = new Map<string, MovieRecord>();
@@ -200,9 +204,40 @@ async function ensureDatabaseSchema() {
       expires_at BIGINT
     )
   `);
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS movies (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      synopsis TEXT,
+      backdrop_url TEXT,
+      poster_url TEXT,
+      video_url TEXT,
+      category TEXT,
+      rating NUMERIC,
+      release_year INT,
+      duration TEXT,
+      age_rating TEXT,
+      genres TEXT[],
+      "cast" TEXT[],
+      is_trending BOOLEAN DEFAULT FALSE,
+      is_popular BOOLEAN DEFAULT FALSE,
+      mux_playback_id TEXT,
+      trailer_url TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pgPool.query(`
+    CREATE TABLE IF NOT EXISTS admins (
+      email TEXT PRIMARY KEY,
+      password_hash TEXT NOT NULL,
+      full_name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
 }
 
-ensureDatabaseSchema().catch((error) => console.error('Database bootstrap error:', error));
+// Initialize database before starting server
+await ensureDatabaseSchema();
 
 app.post('/api/auth/send-code', async (req, res) => {
   const { email } = req.body || {};
@@ -265,7 +300,7 @@ app.post('/api/auth/verify-code', async (req, res) => {
     try {
       const result = await pgPool.query('SELECT id, email, full_name FROM users WHERE email = $1', [normalizedEmail]);
       if (result.rows.length === 0) {
-        const insert = await pgPool.query('INSERT INTO users(email, full_name) VALUES($1,$2) RETURNING id, email, full_name', [normalizedEmail, '']);
+        const insert = await pgPool.query('INSERT INTO users(email, full_name ) VALUES($1,$2) RETURNING id, email, full_name', [normalizedEmail, '']);
         user = { uid: `u_${insert.rows[0].id}`, email: insert.rows[0].email, displayName: insert.rows[0].full_name || insert.rows[0].email.split('@')[0] };
       } else {
         const r = result.rows[0];
@@ -288,21 +323,59 @@ app.post('/api/auth/verify-code', async (req, res) => {
   return res.json({ success: true, message: 'Email verified successfully.', user, token });
 });
 
-app.get('/api/movies', (req, res) => {
+app.get('/api/movies', async (req, res) => {
+  if (pgPool) {
+    try {
+      const result = await pgPool.query('SELECT * FROM movies ORDER BY created_at DESC');
+      const movies = result.rows.map((row: any) => ({
+        id: row.id,
+        title: row.title,
+        synopsis: row.synopsis || '',
+        backdropUrl: row.backdrop_url || '',
+        posterUrl: row.poster_url || '',
+        videoUrl: row.video_url || '',
+        trailerUrl: row.trailer_url || '',
+        category: row.category || 'New Releases',
+        rating: Number(row.rating || 4.7),
+        releaseYear: Number(row.release_year || 2026),
+        duration: row.duration || '2h 10m',
+        ageRating: row.age_rating || 'PG-13',
+        genres: row.genres || [],
+        cast: row.cast || [],
+        isTrending: Boolean(row.is_trending),
+        isPopular: Boolean(row.is_popular),
+        muxPlaybackId: row.mux_playback_id || '',
+      }));
+      return res.json({ success: true, movies });
+    } catch (error: any) {
+      console.error('Postgres movie fetch error:', error.message);
+    }
+  }
+
   const movies = Array.from(movieStore.values());
   return res.json({ success: true, movies });
 });
 
-app.post('/api/movies', verifyAdminToken, (req, res) => {
-
+app.post('/api/movies', verifyAdminToken, async (req, res) => {
   const payload = req.body || {};
+  const movieId = `m_${Date.now()}`;
+  let videoUrl = payload.videoUrl || '';
+  let muxPlaybackId = payload.muxPlaybackId || '';
+  const trailerUrl = payload.trailerUrl || '';
+
+  if (!videoUrl && mux && payload.muxPlaybackId) {
+    muxPlaybackId = payload.muxPlaybackId;
+    videoUrl = `https://stream.mux.com/${payload.muxPlaybackId}.m3u8`;
+  }
+
   const movie: MovieRecord = {
-    id: `m_${Date.now()}`,
+    id: movieId,
     title: payload.title || 'Untitled Movie',
     synopsis: payload.synopsis || '',
     backdropUrl: payload.backdropUrl || '',
     posterUrl: payload.posterUrl || '',
-    videoUrl: payload.videoUrl || '',
+    videoUrl,
+    trailerUrl,
     category: payload.category || 'New Releases',
     rating: Number(payload.rating) || 4.7,
     releaseYear: Number(payload.releaseYear) || 2026,
@@ -312,13 +385,27 @@ app.post('/api/movies', verifyAdminToken, (req, res) => {
     cast: Array.isArray(payload.cast) ? payload.cast : [],
     isTrending: Boolean(payload.isTrending),
     isPopular: Boolean(payload.isPopular),
+    muxPlaybackId,
   };
 
   movieStore.set(movie.id, movie);
+
+  if (pgPool) {
+    try {
+      await pgPool.query(
+        `INSERT INTO movies(id, title, synopsis, backdrop_url, poster_url, video_url, category, rating, release_year, duration, age_rating, genres, "cast", is_trending, is_popular, mux_playback_id, trailer_url)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+        [movie.id, movie.title, movie.synopsis, movie.backdropUrl, movie.posterUrl, movie.videoUrl, movie.category, movie.rating, movie.releaseYear, movie.duration, movie.ageRating, movie.genres, movie.cast, movie.isTrending, movie.isPopular, movie.muxPlaybackId || null, movie.trailerUrl || null]
+      );
+    } catch (error: any) {
+      console.error('Postgres movie insert error:', error.message);
+    }
+  }
+
   return res.json({ success: true, movie });
 });
 
-app.put('/api/movies/:id', verifyAdminToken, (req, res) => {
+app.put('/api/movies/:id', verifyAdminToken, async (req, res) => {
 
   const movieId = req.params.id;
   const existing = movieStore.get(movieId);
@@ -332,6 +419,7 @@ app.put('/api/movies/:id', verifyAdminToken, (req, res) => {
     backdropUrl: payload.backdropUrl || existing.backdropUrl,
     posterUrl: payload.posterUrl || existing.posterUrl,
     videoUrl: payload.videoUrl || existing.videoUrl,
+    trailerUrl: payload.trailerUrl || existing.trailerUrl || '',
     category: payload.category || existing.category,
     rating: Number(payload.rating) || existing.rating,
     releaseYear: Number(payload.releaseYear) || existing.releaseYear,
@@ -344,42 +432,68 @@ app.put('/api/movies/:id', verifyAdminToken, (req, res) => {
   };
 
   movieStore.set(movieId, updated);
+
+  if (pgPool) {
+    try {
+      await pgPool.query(
+        `UPDATE movies SET title=$2, synopsis=$3, backdrop_url=$4, poster_url=$5, video_url=$6, category=$7, rating=$8, release_year=$9, duration=$10, age_rating=$11, genres=$12, "cast"=$13, is_trending=$14, is_popular=$15, mux_playback_id=$16, trailer_url=$17 WHERE id=$1`,
+        [movieId, updated.title, updated.synopsis, updated.backdropUrl, updated.posterUrl, updated.videoUrl, updated.category, updated.rating, updated.releaseYear, updated.duration, updated.ageRating, updated.genres, updated.cast, updated.isTrending, updated.isPopular, updated.muxPlaybackId || null, updated.trailerUrl || null]
+      );
+    } catch (error: any) {
+      console.error('Postgres movie update error:', error.message);
+    }
+  }
+
   return res.json({ success: true, movie: updated });
 });
 
-app.delete('/api/movies/:id', verifyAdminToken, (req, res) => {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded: any = jwt.verify(token, ADMIN_JWT_SECRET);
-    if (!decoded || decoded.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid admin token' });
-  }
-
+app.delete('/api/movies/:id', verifyAdminToken, async (req, res) => {
   const movieId = req.params.id;
   const exists = movieStore.has(movieId);
   if (!exists) return res.status(404).json({ error: 'Movie not found' });
   movieStore.delete(movieId);
+
+  if (pgPool) {
+    try {
+      await pgPool.query('DELETE FROM movies WHERE id = $1', [movieId]);
+    } catch (error: any) {
+      console.error('Postgres movie delete error:', error.message);
+    }
+  }
+
   return res.json({ success: true });
 });
 
 /**
  * FLUTTERWAVE ENDPOINT: Initialize Subscription Payment
  */
-app.post('/api/payments/initialize', verifyClerkToken, async (req, res) => {
+app.post('/api/payments/initialize', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded: any = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid user token.' });
+  }
+
   const { email, uid, profileId, name } = req.body;
+
   if (!email || !uid) {
-    return res.status(400).json({ error: 'Auth credentials are required.' });
+    return res.status(400).json({
+      error: 'Auth credentials are required.',
+    });
   }
 
   const tx_ref = `sub_${uid}_${profileId || 'default'}_${Date.now()}`;
   const flutterwaveSecret = process.env.FLUTTERWAVE_SECRET_KEY;
 
+  // If no Flutterwave key is configured, use the payment simulator
   if (!flutterwaveSecret) {
-    // No keys configured, return Sandbox Sandbox Simulator link
     return res.json({
       success: true,
       sandboxMode: true,
@@ -396,26 +510,50 @@ app.post('/api/payments/initialize', verifyClerkToken, async (req, res) => {
       },
       body: JSON.stringify({
         tx_ref,
-        amount: '9.99',verifyAdminToken, (req, res) => {      }),
+        amount: '9.99',
+        currency: 'USD',
+        redirect_url: `${process.env.BASE_URL || 'http://localhost:3000'}/api/payments/callback`,
+        payment_options: 'card,mobilemoney,banktransfer',
+
+        customer: {
+          email,
+          name: name || 'Subscriber',
+        },
+
+        customizations: {
+          title: 'Netflix AI Studio',
+          description: 'Premium Movie Subscription',
+        },
+
+        meta: {
+          uid,
+          profileId: profileId || 'default',
+        },
+      }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`Flutterwave API returned status ${response.status}: ${errText}`);
+      throw new Error(
+        `Flutterwave API returned status ${response.status}: ${errText}`
+      );
     }
 
     const resData = await response.json();
-    if (resData && resData.data && resData.data.link) {
+
+    if (resData?.data?.link) {
       return res.json({
         success: true,
         checkoutUrl: resData.data.link,
       });
-    } else {
-      throw new Error('Invalid Flutterwave response format');
     }
+
+    throw new Error('Invalid Flutterwave response format');
+
   } catch (err: any) {
     console.error('Flutterwave Initialization Error:', err.message);
-    // Return graceful fallback simulator so the reviewer's flow is never blocked
+
+    // Fallback to local payment simulator
     return res.json({
       success: true,
       sandboxMode: true,
@@ -424,7 +562,6 @@ app.post('/api/payments/initialize', verifyClerkToken, async (req, res) => {
     });
   }
 });
-
 /**
  * FLUTTERWAVE ENDPOINT: Callback Redirect
  */
@@ -473,6 +610,19 @@ app.post('/api/payments/simulate-success', async (req, res) => {
   if (!uid) return res.status(400).json({ error: 'UID is required' });
 
   try {
+    if (pgPool) {
+      await pgPool.query(`
+        INSERT INTO subscriptions(user_id, is_premium, tx_ref, transaction_id, subscribed_at, expires_at)
+        VALUES($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (user_id) DO UPDATE SET
+          is_premium = EXCLUDED.is_premium,
+          tx_ref = EXCLUDED.tx_ref,
+          transaction_id = EXCLUDED.transaction_id,
+          subscribed_at = EXCLUDED.subscribed_at,
+          expires_at = EXCLUDED.expires_at
+      `, [uid, true, tx_ref || `sim_${Date.now()}`, `sim_${Math.floor(100000 + Math.random() * 900000)}`, Date.now(), Date.now() + 30 * 24 * 60 * 60 * 1000]);
+    }
+
     // Record premium membership
     await db.collection('subscriptions').doc(uid).set({
       isPremium: true,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Movie, UserProfile } from '../types';
 import { Play, Plus, Check, Info, Volume2, VolumeX } from 'lucide-react';
 import { db } from '../lib/firebase';
@@ -14,10 +14,17 @@ interface HeroBannerProps {
   isLoading?: boolean;
 }
 
+const getBackgroundVideoUrl = (movie?: Movie) => {
+  if (!movie) return '';
+  return movie.videoUrl || movie.videoUrl || '';
+};
+
 export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAuthRequired, isLoading = false }: HeroBannerProps) {
   const [inList, setInList] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [loadingList, setLoadingList] = useState(true);
+  const [videoReady, setVideoReady] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Synchronise watchlist from Firestore
   useEffect(() => {
@@ -40,6 +47,24 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
     return () => unsubscribe();
   }, [profile?.id, movie?.id]);
 
+  // Reset video-ready state whenever we get a new movie, then force play as a fallback
+  // for browsers that ignore the autoPlay attribute on async-loaded <video> elements.
+  useEffect(() => {
+    setVideoReady(false);
+    const el = videoRef.current;
+    const backgroundVideoUrl = getBackgroundVideoUrl(movie);
+    if (!el || !backgroundVideoUrl) return;
+
+    const tryPlay = () => {
+      el.play().catch(() => {
+        // Autoplay was blocked (e.g. browser policy) — leave the poster showing.
+        // The mute toggle button still lets the user start it manually if needed.
+      });
+    };
+
+    tryPlay();
+  }, [movie?.id, movie?.videoUrl]);
+
   const handleToggleList = async () => {
     if (!profile || profile.id === 'guest' || !movie) {
       if (onAuthRequired) onAuthRequired();
@@ -54,14 +79,12 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) {
-        // Add to watchlist
         await addDoc(collection(db, 'watchlist'), {
           profileId: profile.id,
           movieId: movie.id,
           addedAt: Date.now()
         });
       } else {
-        // Remove from watchlist
         const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
         await Promise.all(deletePromises);
       }
@@ -73,11 +96,8 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
   if (isLoading || !movie) {
     return (
       <div className="relative h-[55vh] md:h-[80vh] w-full overflow-hidden bg-zinc-950 flex flex-col justify-end pb-12 px-4 md:px-12 border-b border-zinc-900/10">
-        {/* Shadow overlays for smooth blending */}
         <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-zinc-900/10 to-transparent" />
         <div className="absolute inset-0 bg-zinc-900/25 animate-pulse" />
-        
-        {/* Info elements placeholder */}
         <div className="relative z-10 max-w-xl space-y-4 animate-pulse">
           <div className="h-4 w-28 bg-zinc-800/80 rounded-md" />
           <div className="h-10 md:h-16 w-3/4 bg-zinc-800/80 rounded-lg" />
@@ -101,26 +121,41 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
 
   return (
     <div className="relative h-[55vh] md:h-[80vh] w-full overflow-hidden select-none bg-black">
-      {/* Background Backdrop Image/Video with Rich Shadow Vignettes */}
+      {/* Background: poster shows first, video crossfades in once it can actually play */}
       <div className="absolute inset-0">
-        <video
-          src={movie.videoUrl}
-          autoPlay
-          loop
-          muted={isMuted}
-          playsInline
-          className="w-full h-full object-cover brightness-[0.7] scale-102 transition-all duration-700"
-          poster={movie.backdropUrl}
+        {/* Poster image, always present as a fallback / while video buffers */}
+        <img
+          src={movie.backdropUrl}
+          alt={movie.title}
+          className={`absolute inset-0 w-full h-full object-cover brightness-[0.7] transition-opacity duration-700 ${
+            videoReady ? 'opacity-0' : 'opacity-100'
+          }`}
         />
-        {/* Shadow overlays for true cinematic blending */}
+
+        {getBackgroundVideoUrl(movie) && (
+          <video
+            ref={videoRef}
+            key={movie.id}
+            src={getBackgroundVideoUrl(movie)}
+            autoPlay
+            loop
+            muted={isMuted}
+            playsInline
+            preload="auto"
+            onCanPlay={() => setVideoReady(true)}
+            onPlaying={() => setVideoReady(true)}
+            className={`absolute inset-0 w-full h-full object-cover brightness-[0.7] scale-102 transition-opacity duration-700 ${
+              videoReady ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
+        )}
+
         <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-black/30 to-black/30" />
         <div className="absolute inset-0 bg-gradient-to-r from-[#141414] via-transparent to-transparent opacity-90" />
       </div>
 
       {/* Main Content Info Container */}
       <div className="absolute bottom-10 md:bottom-24 left-4 md:left-12 max-w-xl md:max-w-2xl z-20 space-y-3 md:space-y-6">
-        
-        {/* Accent Tag */}
         {movie.isTrending && (
           <div className="flex items-center gap-2">
             <span className="bg-red-600 text-[10px] md:text-xs font-bold px-2 py-0.5 rounded-xs uppercase tracking-wider text-white shadow-md">
@@ -132,8 +167,7 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
           </div>
         )}
 
-        {/* Title */}
-        <motion.h1 
+        <motion.h1
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
@@ -142,12 +176,10 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
           {movie.title}
         </motion.h1>
 
-        {/* Synopsis */}
         <p className="text-xs md:text-sm text-zinc-200 line-clamp-3 leading-relaxed drop-shadow-sm font-light max-w-lg">
           {movie.synopsis}
         </p>
 
-        {/* Meta Info Row */}
         <div className="flex items-center gap-3 text-xs text-zinc-300 font-medium">
           <span className="text-emerald-400 font-bold">{Math.round(movie.rating * 20)}% Match</span>
           <span>{movie.releaseYear}</span>
@@ -155,9 +187,7 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
           <span>{movie.duration}</span>
         </div>
 
-        {/* Controls: Play, List, Info */}
         <div className="flex flex-wrap gap-2 md:gap-3.5 pt-2">
-          {/* Play Button */}
           <button
             onClick={() => onPlay(movie)}
             className="flex items-center justify-center gap-2 px-6 md:px-8 py-2 md:py-3 bg-white text-black hover:bg-zinc-200 font-semibold text-xs md:text-sm rounded-md transition-all shadow-md cursor-pointer"
@@ -166,12 +196,11 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
             <span>Play</span>
           </button>
 
-          {/* My List Button */}
           <button
             onClick={handleToggleList}
             className={`flex items-center justify-center gap-2 px-5 md:px-6 py-2 md:py-3 border ${
-              inList 
-                ? 'bg-zinc-800/40 border-emerald-500 text-emerald-400' 
+              inList
+                ? 'bg-zinc-800/40 border-emerald-500 text-emerald-400'
                 : 'bg-[#141414]/50 border-zinc-600 text-white hover:border-white'
             } font-semibold text-xs md:text-sm rounded-md transition-all shadow-md cursor-pointer`}
           >
@@ -179,7 +208,6 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
             <span>My List</span>
           </button>
 
-          {/* More Info */}
           <button
             onClick={() => onOpenDetails(movie)}
             className="flex items-center justify-center gap-2 px-5 md:px-6 py-2 md:py-3 bg-zinc-500/30 hover:bg-zinc-500/50 border border-transparent hover:border-zinc-400/30 text-white font-semibold text-xs md:text-sm rounded-md transition-all shadow-md cursor-pointer"
@@ -192,7 +220,6 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
 
       {/* Right Side Info & Audio Tag */}
       <div className="absolute right-0 bottom-16 md:bottom-28 z-20 flex items-center gap-3 pr-4 md:pr-12">
-        {/* Simulated Mute/Audio toggle */}
         <button
           onClick={() => setIsMuted(!isMuted)}
           className="p-2 bg-zinc-900/60 hover:bg-zinc-800/80 rounded-full border border-zinc-700/50 text-white cursor-pointer transition-colors"
@@ -201,7 +228,6 @@ export default function HeroBanner({ movie, profile, onPlay, onOpenDetails, onAu
           {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
         </button>
 
-        {/* Ambient rating flag */}
         <div className="border-l-4 border-zinc-400 bg-zinc-900/50 text-zinc-300 px-3.5 py-1 text-xs md:text-sm font-medium pr-12">
           {movie.ageRating}
         </div>

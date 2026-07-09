@@ -43,8 +43,14 @@ export async function verifyVerificationCode(email: string, code: string) {
 }
 
 export async function initializeSubscriptionCheckout(payload: Record<string, unknown>) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('netflix_auth_token') : null;
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   return request<{ success: boolean; checkoutUrl?: string; sandboxMode?: boolean; error?: string }>('/api/payments/initialize', {
     method: 'POST',
+    headers,
     body: JSON.stringify(payload),
   });
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Movie, UserProfile, UserSubscription, InAppNotification } from './types';
 import { MOVIES } from './data/movies';
 import AdminCMSPage from './components/AdminCMSPage';
+import AdminAuthPage from './components/AdminAuthPage';
 import AuthPage from './components/AuthPage';
 import ProfileSelector from './components/ProfileSelector';
 import PaymentSimulator from './components/PaymentSimulator';
@@ -314,7 +315,10 @@ export default function App() {
   };
 
   const handleInitiateCheckout = async () => {
-    if (!authUser) return;
+    if (!authUser) {
+      setShowToast('Please log in to access premium features.');
+      return;
+    }
     setIsCheckoutLoading(true);
 
     try {
@@ -405,8 +409,13 @@ export default function App() {
     return <AuthPage onClose={() => setForceAuthScreen(false)} onLoginSuccess={(u) => setAuthUser(u)} />;
   }
 
-  if (pathname === '/admin' || pathname === '/cms') {
+  if (pathname === '/cms') {
     return <AdminCMSPage />;
+  }
+
+  if (pathname === '/admin') {
+    const adminToken = typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
+    return adminToken ? <AdminCMSPage /> : <AdminAuthPage />;
   }
 
   if (forceAuthScreen && !authUser) {
