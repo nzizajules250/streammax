@@ -52,6 +52,7 @@ export default function AdminCMSPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [statsLoading, setStatsLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -146,7 +147,7 @@ export default function AdminCMSPage() {
   const handleDelete = async (movieId: string) => {
     setError('');
     setSuccess('');
-    const response = await fetch(`/api/movies/${movieId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${adminToken}` } });
+    const response = await fetch(`/api/movies/${movieId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${adminToken}`, 'Content-Type': 'application/json' } });
     const data = await response.json().catch(() => ({}));
     if (response.status === 401) {
       handleUnauthorized();
@@ -487,7 +488,7 @@ export default function AdminCMSPage() {
           </div>
 
           {/* Movies List Section */}
-          <div className="rounded-3xl bg-linearo-br from-zinc-900/90 via-black/90 to-red-950/20 backdrop-blur-xl border border-red-900/20 shadow-2xl shadow-red-900/5 p-8">
+          <div className="rounded-3xl bg-linear-to-br from-zinc-900/90 via-black/90 to-red-950/20 backdrop-blur-xl border border-red-900/20 shadow-2xl shadow-red-900/5 p-8">
             <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-3">
                 <Film className="h-5 w-5 text-red-400" />
@@ -496,11 +497,21 @@ export default function AdminCMSPage() {
                   <p className="text-sm text-red-300">Manage all available titles with rich metadata and quick actions.</p>
                 </div>
               </div>
-              <span className="px-4 py-2 rounded-full bg-red-900/20 border border-red-700/30 text-sm font-semibold text-red-200">
-                {movies.length} titles
-              </span>
+              <div className="flex flex-wrap gap-3 items-center">
+                <label className="relative block">
+                  <span className="sr-only">Search movies</span>
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search movies..."
+                    className="w-full min-w-[220px] rounded-2xl border border-zinc-800 bg-zinc-950/80 px-4 py-3 text-sm text-white placeholder:text-zinc-500 focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 outline-none"
+                  />
+                </label>
+                <span className="px-4 py-2 rounded-full bg-red-900/20 border border-red-700/30 text-sm font-semibold text-red-200">
+                  {movies.length} titles
+                </span>
+              </div>
             </div>
-
             <div className="overflow-x-auto rounded-3xl border border-red-900/30 bg-[#060606]/90">
               <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
                 <thead className="bg-[#080808] text-zinc-400 uppercase tracking-[0.18em] text-[11px]">

@@ -455,12 +455,34 @@ app.post('/api/movies', verifyAdminToken, async (req, res) => {
   if (pgPool) {
     try {
       await pgPool.query(
-        `INSERT INTO movies(id, title, synopsis, backdrop_url, poster_url, video_url, category, media_type, series_count, rating, release_year, duration, age_rating, genres, "cast", is_trending, is_popular, mux_playback_id, trailer_url)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
-        [movie.id, movie.title, movie.synopsis, movie.backdropUrl, movie.posterUrl, movie.videoUrl, movie.category, movie.mediaType || null, movie.seriesCount || 0, movie.episodeUrls || null, movie.rating, movie.releaseYear, movie.duration, movie.ageRating, movie.genres, movie.cast, movie.isTrending, movie.isPopular, movie.muxPlaybackId || null, movie.trailerUrl || null]
+        `INSERT INTO movies(id, title, synopsis, backdrop_url, poster_url, video_url, category, media_type, series_count, episode_urls, rating, release_year, duration, age_rating, genres, "cast", is_trending, is_popular, mux_playback_id, trailer_url)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+        [
+          movie.id,
+          movie.title,
+          movie.synopsis,
+          movie.backdropUrl,
+          movie.posterUrl,
+          movie.videoUrl,
+          movie.category,
+          movie.mediaType || null,
+          movie.seriesCount || 0,
+          movie.episodeUrls || null,
+          movie.rating,
+          movie.releaseYear,
+          movie.duration,
+          movie.ageRating,
+          movie.genres,
+          movie.cast,
+          movie.isTrending,
+          movie.isPopular,
+          movie.muxPlaybackId || null,
+          movie.trailerUrl || null,
+        ]
       );
     } catch (error: any) {
       console.error('Postgres movie insert error:', error.message);
+      return res.status(500).json({ success: false, error: 'Unable to save movie to database.' });
     }
   }
 
