@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Movie, UserProfile, ReviewDoc } from '../types';
 import { MOVIES } from '../data/movies';
-import { Play, Plus, Check, Heart, X, Send, Trash2, Star, Calendar, Clock, Smile, Share2, Download } from 'lucide-react';
+import { Play, Plus, Check, Heart, X, Send, Trash2, Star, Calendar, Clock, Smile, Share2, Download, TrendingUp, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ShareModal from './ShareModal';
 
@@ -131,7 +131,6 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
       if (saved) {
         setReviews(JSON.parse(saved) as ReviewDoc[]);
       } else {
-        // Prepopulate with elegant mock comments
         const seeded: ReviewDoc[] = (DEFAULT_CRITIQUES[movie.id] || DEFAULT_CRITIQUES.default).map((c, idx) => ({
           id: `seed_${idx}`,
           profileId: `seed_user_${idx}`,
@@ -139,7 +138,7 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
           profileAvatar: ["🎬", "🍿", "⭐️"][idx % 3],
           movieId: movie.id,
           content: c,
-          timestamp: Date.now() - (idx * 3600000 * 4) // spaced by hours
+          timestamp: Date.now() - (idx * 3600000 * 4)
         }));
         localStorage.setItem(key, JSON.stringify(seeded));
         setReviews(seeded);
@@ -150,7 +149,6 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
     return () => clearInterval(interval);
   }, [movie.id]);
 
-  // Add review to LocalStorage
   const handleAddReview = (e: React.FormEvent) => {
     e.preventDefault();
     if (profile.id === 'guest') {
@@ -186,7 +184,6 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
     }
   };
 
-  // Delete review from LocalStorage
   const handleDeleteReview = (reviewId: string) => {
     if (profile.id === 'guest') {
       if (onAuthRequired) onAuthRequired();
@@ -273,228 +270,302 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
     }
   };
 
-  // Recommendations: Other movies in the same genre
   const recommendations = MOVIES.filter(m => m.id !== movie.id && m.genres.some(g => movie.genres.includes(g))).slice(0, 3);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-xs overflow-y-auto select-none">
-      {/* Click outside to close */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-gradient-to-br from-black/95 via-zinc-950/95 to-red-950/95 backdrop-blur-md overflow-y-auto select-none">
       <div className="absolute inset-0 cursor-default" onClick={onClose} />
 
-      {/* Main Card Content Container */}
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 30 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 30 }}
         transition={{ duration: 0.35, ease: 'easeOut' }}
-        className="relative bg-[#181818] text-white w-full max-w-4xl rounded-xl overflow-hidden shadow-2xl z-20 border border-zinc-800/80 max-h-[90vh] flex flex-col no-scrollbar"
+        className="relative bg-gradient-to-b from-zinc-900 via-black to-red-950/30 text-white w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl z-20 border border-red-900/20 max-h-[90vh] flex flex-col backdrop-blur-xl"
       >
         {/* Header Hero Backdrop section */}
         <div className="relative h-[25vh] md:h-[45vh] w-full flex-none">
           <img
             src={movie.backdropUrl}
             alt={movie.title}
-            className="w-full h-full object-cover brightness-[0.75]"
+            className="w-full h-full object-cover brightness-[0.7]"
             referrerPolicy="no-referrer"
           />
-          {/* Shadows to blend with black body background */}
-          <div className="absolute inset-0 bg-gradient-to-t from-[#181818] via-transparent to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#181818]/60 via-transparent to-transparent" />
+          
+          {/* Enhanced gradient overlays */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-transparent to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-b from-red-950/20 via-transparent to-transparent" />
 
-          {/* Close trigger */}
-          <button
+          {/* Close button */}
+          <motion.button
+            whileHover={{ scale: 1.1, rotate: 90 }}
+            whileTap={{ scale: 0.9 }}
             onClick={onClose}
-            className="absolute top-4 right-4 p-2 bg-black/70 hover:bg-zinc-800/80 rounded-full text-white cursor-pointer transition-colors border border-white/10"
+            className="absolute top-4 right-4 p-2.5 bg-black/60 hover:bg-red-950/50 rounded-full text-white transition-all duration-300 border border-zinc-700/50 hover:border-red-500/50 backdrop-blur-sm shadow-lg"
             title="Close modal"
           >
             <X className="w-5 h-5" />
-          </button>
+          </motion.button>
 
           {/* Title & Floating controls */}
-          <div className="absolute bottom-4 left-4 md:left-10 z-10 space-y-2 md:space-y-4">
-            <h2 className="text-xl md:text-4xl font-extrabold text-white tracking-tight drop-shadow-md">
-              {movie.title}
-            </h2>
+          <div className="absolute bottom-4 left-4 md:left-10 z-10 space-y-3 md:space-y-4">
+            <motion.h2
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="text-2xl md:text-4xl font-black text-white tracking-tight drop-shadow-lg"
+            >
+              <span className="bg-gradient-to-r from-white via-zinc-200 to-red-200 bg-clip-text text-transparent">
+                {movie.title}
+              </span>
+            </motion.h2>
 
-            <div className="flex items-center gap-2 md:gap-3.5 flex-wrap">
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="flex items-center gap-2 md:gap-3.5 flex-wrap"
+            >
               {/* Play Button */}
               <button
                 onClick={() => onPlay(movie)}
-                className="flex items-center gap-1.5 px-5 md:px-7 py-2 bg-white text-black hover:bg-zinc-200 font-bold text-xs md:text-sm rounded-md transition-colors shadow-md cursor-pointer"
+                className="group relative overflow-hidden flex items-center gap-2 px-6 md:px-8 py-2.5 bg-white text-black font-bold text-sm md:text-base rounded-xl transition-all duration-300 hover:shadow-xl hover:shadow-white/20 transform hover:scale-105 active:scale-95"
               >
-                <Play className="w-3.5 h-3.5 fill-current text-black" />
+                <Play className="w-4 h-4 md:w-5 md:h-5 fill-current transition-transform duration-300 group-hover:scale-110" />
                 <span>Play</span>
+                <div className="absolute inset-0 bg-gradient-to-r from-red-500/0 via-red-500/10 to-red-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
               </button>
 
-              {/* Watchlist */}
+              {/* Watchlist Button */}
               <button
                 onClick={handleToggleList}
-                className={`p-2 border rounded-full cursor-pointer transition-colors ${
+                className={`group p-2.5 border-2 rounded-xl transition-all duration-300 transform hover:scale-110 active:scale-95 backdrop-blur-sm ${
                   inList 
-                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' 
-                    : 'bg-zinc-900/80 border-zinc-600 hover:border-white text-zinc-300 hover:text-white'
+                    ? 'bg-gradient-to-r from-emerald-600/20 to-emerald-900/20 border-emerald-500/50 text-emerald-400 shadow-lg shadow-emerald-900/20' 
+                    : 'bg-zinc-900/60 border-zinc-700/50 text-zinc-300 hover:border-red-500/50 hover:bg-red-950/30'
                 }`}
                 title="Add to Watchlist"
               >
-                {inList ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                {inList ? (
+                  <Check className="w-4 h-4 md:w-5 md:h-5" />
+                ) : (
+                  <Plus className="w-4 h-4 md:w-5 md:h-5 transition-transform duration-300 group-hover:rotate-90" />
+                )}
               </button>
 
-              {/* Favorite Rating */}
+              {/* Favorite Button */}
               <button
                 onClick={handleToggleLike}
-                className={`p-2 border rounded-full cursor-pointer transition-colors ${
+                className={`group p-2.5 border-2 rounded-xl transition-all duration-300 transform hover:scale-110 active:scale-95 backdrop-blur-sm ${
                   isLiked 
-                    ? 'bg-rose-500/20 border-rose-500 text-rose-400' 
-                    : 'bg-zinc-900/80 border-zinc-600 hover:border-white text-zinc-300 hover:text-white'
+                    ? 'bg-gradient-to-r from-rose-600/20 to-rose-900/20 border-rose-500/50 text-rose-400 shadow-lg shadow-rose-900/20' 
+                    : 'bg-zinc-900/60 border-zinc-700/50 text-zinc-300 hover:border-red-500/50 hover:bg-red-950/30'
                 }`}
                 title="Favorite"
               >
-                <Heart className={`w-4 h-4 ${isLiked ? 'fill-current' : ''}`} />
+                <Heart className={`w-4 h-4 md:w-5 md:h-5 transition-transform duration-300 group-hover:scale-110 ${isLiked ? 'fill-current' : ''}`} />
               </button>
 
-              {/* Offline download trigger */}
+              {/* Download Button */}
               <button
                 onClick={handleToggleDownload}
-                className={`p-2 border rounded-full cursor-pointer transition-colors ${
+                className={`group p-2.5 border-2 rounded-xl transition-all duration-300 transform hover:scale-110 active:scale-95 backdrop-blur-sm ${
                   isDownloaded 
-                    ? 'bg-cyan-500/25 border-cyan-500 text-cyan-400' 
-                    : 'bg-zinc-900/80 border-zinc-600 hover:border-white text-zinc-300 hover:text-white'
+                    ? 'bg-gradient-to-r from-cyan-600/20 to-cyan-900/20 border-cyan-500/50 text-cyan-400 shadow-lg shadow-cyan-900/20' 
+                    : 'bg-zinc-900/60 border-zinc-700/50 text-zinc-300 hover:border-red-500/50 hover:bg-red-950/30'
                 }`}
                 title={isDownloaded ? 'Delete Downloaded Movie' : 'Download for Offline Mode'}
               >
-                <Download className="w-4 h-4" />
+                <Download className="w-4 h-4 md:w-5 md:h-5 transition-transform duration-300 group-hover:scale-110" />
               </button>
 
-              {/* Secure Social share trigger */}
+              {/* Share Button */}
               <button
                 onClick={() => setIsSharing(true)}
-                className="p-2 border bg-zinc-900/80 border-zinc-600 hover:border-white text-zinc-300 hover:text-white rounded-full cursor-pointer transition-colors"
+                className="group p-2.5 bg-zinc-900/60 backdrop-blur-sm border-2 border-zinc-700/50 text-zinc-300 hover:text-white hover:border-red-500/50 hover:bg-red-950/30 rounded-xl transition-all duration-300 transform hover:scale-110 active:scale-95"
                 title="Secure Share"
               >
-                <Share2 className="w-4 h-4" />
+                <Share2 className="w-4 h-4 md:w-5 md:h-5 transition-transform duration-300 group-hover:scale-110" />
               </button>
-            </div>
+            </motion.div>
           </div>
         </div>
 
         {/* Modal Scroll Body */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-10 space-y-8 no-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 custom-scrollbar">
           {/* Details split grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {/* Left Col: Match & Synopsis */}
-            <div className="md:col-span-2 space-y-4 text-sm">
-              <div className="flex items-center gap-3 font-medium text-zinc-300">
-                <span className="text-emerald-400 font-bold text-base">{Math.round(movie.rating * 20)}% Match</span>
-                <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-zinc-400" /> {movie.releaseYear}</span>
-                <span className="border border-zinc-700 px-1.5 py-0.2 text-xs rounded-xs font-semibold">{movie.rating}</span>
-                <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-zinc-400" /> {movie.duration}</span>
-              </div>
+            <div className="md:col-span-2 space-y-5 text-sm">
+              <motion.div
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.3 }}
+                className="flex items-center gap-4 font-medium text-zinc-300 flex-wrap"
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center shadow-lg shadow-emerald-900/30">
+                    <span className="text-xs font-bold text-white">{Math.round(movie.rating * 20)}%</span>
+                  </div>
+                  <span className="text-emerald-400 font-semibold">Match</span>
+                </div>
+                <span className="text-zinc-600">|</span>
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-zinc-500" />
+                  {movie.releaseYear}
+                </span>
+                <span className="px-2 py-0.5 border border-zinc-600/50 rounded-lg text-xs font-semibold bg-zinc-900/50 backdrop-blur-sm">
+                  {movie.ageRating}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-zinc-500" />
+                  {movie.duration}
+                </span>
+              </motion.div>
 
-              <p className="text-zinc-200 leading-relaxed font-light text-sm sm:text-base">
+              <motion.p
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="text-zinc-300 leading-relaxed font-light text-sm sm:text-base"
+              >
                 {movie.synopsis}
-              </p>
+              </motion.p>
             </div>
 
             {/* Right Col: Cast & Genres */}
-            <div className="space-y-3 text-xs md:text-sm border-l border-zinc-800/80 pl-0 md:pl-6">
+            <motion.div
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.3 }}
+              className="space-y-5 text-xs md:text-sm border-l border-zinc-800/50 pl-0 md:pl-6"
+            >
               <div>
-                <span className="text-zinc-500 font-semibold block mb-1">Cast:</span>
-                <p className="text-zinc-300 leading-tight">{movie.cast.join(', ')}</p>
+                <span className="text-zinc-400 font-semibold block mb-2 uppercase tracking-wider text-xs">Cast</span>
+                <p className="text-zinc-300 leading-relaxed">{movie.cast.join(', ')}</p>
               </div>
 
               <div>
-                <span className="text-zinc-500 font-semibold block mb-1">Genres:</span>
-                <div className="flex flex-wrap gap-1.5 mt-1">
+                <span className="text-zinc-400 font-semibold block mb-2 uppercase tracking-wider text-xs">Genres</span>
+                <div className="flex flex-wrap gap-2">
                   {movie.genres.map(genre => (
-                    <span key={genre} className="bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded-xs border border-zinc-700/50">
+                    <span key={genre} className="bg-gradient-to-r from-red-950/30 to-zinc-900/80 text-zinc-300 px-3 py-1 rounded-lg border border-red-900/20 text-xs font-medium backdrop-blur-sm">
                       {genre}
                     </span>
                   ))}
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-zinc-800/50 space-y-2">
+              <div className="pt-4 border-t border-zinc-800/30 space-y-4">
                 <div>
-                  <span className="text-zinc-500 font-semibold block mb-0.5">Community Rating:</span>
-                  <div className="flex items-center gap-1 text-amber-400 font-bold">
-                    <Star className="w-4 h-4 fill-current" />
-                    <span>{movie.rating} / 5</span>
+                  <span className="text-zinc-400 font-semibold block mb-2 uppercase tracking-wider text-xs">Community Rating</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <Star className="w-5 h-5 text-amber-400 fill-current" />
+                      <span className="text-amber-400 font-bold text-lg">{movie.rating}</span>
+                    </div>
+                    <span className="text-zinc-500 text-xs">/ 5.0</span>
                   </div>
                 </div>
 
                 <div>
-                  <span className="text-zinc-500 font-semibold block mb-1">Your Rating:</span>
+                  <span className="text-zinc-400 font-semibold block mb-2 uppercase tracking-wider text-xs">Your Rating</span>
                   <div className="flex items-center gap-1">
                     {[1, 2, 3, 4, 5].map((star) => (
-                      <button
+                      <motion.button
                         key={star}
                         type="button"
+                        whileHover={{ scale: 1.2 }}
+                        whileTap={{ scale: 0.9 }}
                         onClick={() => handleSaveRating(star)}
-                        className="text-zinc-600 hover:text-amber-400 transition-colors p-0.5"
+                        className="p-0.5 transition-colors"
                         title={`Rate ${star} Stars`}
                       >
                         <Star 
-                          className={`w-5 h-5 cursor-pointer transition-transform hover:scale-110 ${
-                            userRating >= star ? 'text-amber-400 fill-current' : 'text-zinc-600 hover:text-amber-500'
+                          className={`w-6 h-6 transition-all duration-200 ${
+                            userRating >= star 
+                              ? 'text-amber-400 fill-current drop-shadow-lg' 
+                              : 'text-zinc-600 hover:text-amber-400'
                           }`} 
                         />
-                      </button>
+                      </motion.button>
                     ))}
                     {userRating > 0 && (
-                      <span className="text-xs font-semibold text-amber-400 ml-2 font-mono">
-                        ({userRating}/5)
+                      <span className="text-sm font-bold text-amber-400 ml-2">
+                        {userRating}/5
                       </span>
                     )}
                   </div>
                 </div>
               </div>
-            </div>
+            </motion.div>
           </div>
 
-          {/* More Like This (Simulated local recommendation engine) */}
+          {/* More Like This */}
           {recommendations.length > 0 && (
-            <div className="space-y-3 pt-4 border-t border-zinc-800/80">
-              <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className="space-y-4 pt-6 border-t border-zinc-800/30"
+            >
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-red-400" />
                 More Like This
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {recommendations.map(m => (
-                  <div
+                  <motion.div
                     key={m.id}
+                    whileHover={{ scale: 1.02, y: -4 }}
                     onClick={() => { onClose(); onPlay(m); }}
-                    className="bg-[#202020] hover:bg-zinc-800/60 rounded-lg overflow-hidden border border-zinc-800/40 cursor-pointer group shadow-md transition-colors"
+                    className="bg-gradient-to-br from-zinc-900/80 to-black/80 rounded-xl overflow-hidden border border-zinc-800/50 hover:border-red-800/30 cursor-pointer shadow-lg hover:shadow-red-900/10 transition-all duration-300 backdrop-blur-sm"
                   >
                     <div className="relative h-36">
-                      <img src={m.backdropUrl} alt={m.title} className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300" referrerPolicy="no-referrer" />
-                      <div className="absolute top-2 right-2 bg-black/60 border border-white/5 px-1 py-0.5 text-[9px] font-bold rounded-xs">
+                      <img src={m.backdropUrl} alt={m.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                      <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-sm border border-zinc-700/50 px-2 py-1 text-xs font-semibold rounded-lg text-zinc-300 flex items-center gap-1.5">
+                        <Clock className="w-3 h-3" />
                         {m.duration}
                       </div>
                     </div>
-                    <div className="p-3 space-y-1.5 text-xs text-zinc-300">
-                      <div className="flex items-center justify-between font-bold text-white text-sm">
-                        <span className="truncate max-w-[70%]">{m.title}</span>
-                        <span className="text-emerald-400 font-semibold">{Math.round(m.rating * 20)}% match</span>
+                    <div className="p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-white text-sm truncate max-w-[65%]">{m.title}</span>
+                        <span className="text-emerald-400 font-semibold text-xs flex items-center gap-1">
+                          <Star className="w-3 h-3 fill-current" />
+                          {Math.round(m.rating * 20)}%
+                        </span>
                       </div>
-                      <p className="line-clamp-2 leading-relaxed text-zinc-400 font-light">{m.synopsis}</p>
+                      <p className="text-xs text-zinc-400 line-clamp-2 leading-relaxed font-light">{m.synopsis}</p>
                     </div>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
-            </div>
+            </motion.div>
           )}
 
-          {/* Discussions & Live Reviews Thread */}
-          <div className="space-y-4 pt-4 border-t border-zinc-800/80">
-            <h3 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              <Smile className="w-5 h-5 text-zinc-400" />
-              <span>Workspace Review Stream</span>
-              <span className="text-xs font-normal text-zinc-500 font-mono">({reviews.length} active)</span>
-            </h3>
+          {/* Discussions & Reviews */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6 }}
+            className="space-y-5 pt-6 border-t border-zinc-800/30"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Smile className="w-5 h-5 text-red-400" />
+                <span>Community Reviews</span>
+              </h3>
+              <span className="text-xs font-medium text-zinc-500 bg-zinc-900/60 px-3 py-1 rounded-full border border-zinc-800/50">
+                {reviews.length} reviews
+              </span>
+            </div>
 
-            {/* Comment Post Form */}
-            <form onSubmit={handleAddReview} className="flex gap-2 items-start">
-              {/* Profile Avatar indicator */}
-              <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-lg shadow-inner border border-zinc-700/50 flex-none">
+            {/* Comment Form */}
+            <form onSubmit={handleAddReview} className="flex gap-3 items-start">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-600/20 to-zinc-800 flex items-center justify-center text-lg shadow-inner border border-zinc-700/50 flex-none backdrop-blur-sm">
                 {profile.avatar}
               </div>
 
@@ -502,67 +573,73 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
                 <input
                   type="text"
                   required
-                  placeholder={`Write an honest critique on "${movie.title}" as ${profile.name}...`}
-                  className="w-full px-4 py-2.5 text-sm bg-zinc-900 border border-zinc-800 rounded-lg focus:outline-hidden focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 placeholder-zinc-500 text-zinc-100 transition-all pr-10"
+                  placeholder={`Share your thoughts on "${movie.title}"...`}
+                  className="w-full px-4 py-3 text-sm bg-zinc-950/80 border border-zinc-700/50 rounded-xl focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 placeholder-zinc-500 text-zinc-100 transition-all duration-300 backdrop-blur-sm pr-12"
                   value={commentInput}
                   onChange={(e) => setCommentInput(e.target.value)}
                 />
-                <button
+                <motion.button
                   type="submit"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
                   disabled={submittingReview || !commentInput.trim()}
-                  className="absolute right-2 top-2 p-1 text-zinc-500 hover:text-white disabled:opacity-40 rounded-md cursor-pointer"
+                  className="absolute right-2 top-2.5 p-1.5 text-zinc-500 hover:text-red-400 disabled:opacity-40 rounded-lg transition-colors"
                   title="Post comment"
                 >
                   <Send className="w-4 h-4" />
-                </button>
+                </motion.button>
               </div>
             </form>
 
-            {/* Reviews list stack */}
-            <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+            {/* Reviews List */}
+            <div className="space-y-3 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
               {reviews.length === 0 ? (
-                <div className="text-center py-6 border border-dashed border-zinc-800 rounded-lg text-zinc-500 text-xs">
-                  No critiques posted yet. Be the first to share your thoughts!
+                <div className="text-center py-8 border-2 border-dashed border-zinc-800/50 rounded-xl text-zinc-500 text-sm">
+                  <Smile className="w-8 h-8 mx-auto mb-2 text-zinc-700" />
+                  No reviews yet. Be the first to share your thoughts!
                 </div>
               ) : (
                 reviews.map(rev => (
-                  <div
+                  <motion.div
                     key={rev.id}
-                    className="bg-zinc-900/40 border border-zinc-800/40 p-3 rounded-lg flex gap-2.5 items-start justify-between"
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="bg-gradient-to-r from-zinc-950/80 to-black/80 border border-zinc-800/50 p-4 rounded-xl flex gap-3 items-start justify-between backdrop-blur-sm hover:border-red-900/20 transition-all duration-300"
                   >
-                    <div className="flex gap-2.5 items-start">
-                      <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center text-base border border-zinc-700/30 flex-none">
+                    <div className="flex gap-3 items-start">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-600/20 to-zinc-800 flex items-center justify-center text-base border border-zinc-700/30 flex-none">
                         {rev.profileAvatar}
                       </div>
 
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2 flex-wrap text-xs">
-                          <span className="font-bold text-zinc-300">{rev.profileName}</span>
-                          <span className="text-[9px] text-zinc-500 font-mono">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="font-bold text-zinc-200 text-sm">{rev.profileName}</span>
+                          <span className="text-xs text-zinc-500">
                             {new Date(rev.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
-                        <p className="text-zinc-300 text-xs sm:text-sm font-light leading-relaxed">
+                        <p className="text-zinc-300 text-sm leading-relaxed font-light">
                           {rev.content}
                         </p>
                       </div>
                     </div>
 
-                    {/* Delete OWN review */}
                     {rev.profileId === profile.id && (
-                      <button
+                      <motion.button
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
                         onClick={() => handleDeleteReview(rev.id)}
-                        className="p-1 text-zinc-500 hover:text-red-400 rounded-md transition-colors cursor-pointer flex-none"
+                        className="p-1.5 text-zinc-500 hover:text-red-400 rounded-lg transition-colors flex-none"
                         title="Delete review"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        <Trash2 className="w-4 h-4" />
+                      </motion.button>
                     )}
-                  </div>
+                  </motion.div>
                 ))
               )}
             </div>
-          </div>
+          </motion.div>
         </div>
 
         <AnimatePresence>
@@ -576,33 +653,68 @@ export default function MovieDetailModal({ movie, profile, onClose, onPlay, onAu
         </AnimatePresence>
       </motion.div>
 
-      {showRemoveConfirm && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-100 flex items-center justify-center p-4">
-          <div className="bg-zinc-950 border border-zinc-800 p-6 rounded-2xl max-w-sm w-full text-center space-y-4 shadow-2xl">
-            <h3 className="text-lg font-bold text-white">Remove from My List?</h3>
-            <p className="text-zinc-400 text-sm">
-              Are you sure you want to remove <span className="text-white font-semibold">"{movie.title}"</span> from your personalized collection?
-            </p>
-            <div className="flex gap-3 pt-2">
-              <button
-                onClick={() => {
-                  confirmRemoveList();
-                  setShowRemoveConfirm(false);
-                }}
-                className="flex-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition-all cursor-pointer"
-              >
-                Yes, Remove
-              </button>
-              <button
-                onClick={() => setShowRemoveConfirm(false)}
-                className="flex-1 bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-300 font-bold py-2.5 px-4 rounded-xl text-sm transition-all cursor-pointer border border-zinc-700/50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Remove Confirmation Modal */}
+      <AnimatePresence>
+        {showRemoveConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-gradient-to-b from-zinc-900 to-black border border-red-900/20 p-8 rounded-2xl max-w-sm w-full text-center space-y-5 shadow-2xl backdrop-blur-xl"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-red-600/20 to-red-900/20 border border-red-800/30 mx-auto flex items-center justify-center">
+                <Shield className="w-8 h-8 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white mb-2">Remove from My List?</h3>
+                <p className="text-zinc-400 text-sm leading-relaxed">
+                  Are you sure you want to remove <span className="text-red-400 font-semibold">"{movie.title}"</span> from your collection?
+                </p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={confirmRemoveList}
+                  className="flex-1 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-bold py-3 px-4 rounded-xl text-sm transition-all shadow-lg shadow-red-900/20"
+                >
+                  Yes, Remove
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setShowRemoveConfirm(false)}
+                  className="flex-1 bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 font-bold py-3 px-4 rounded-xl text-sm transition-all border border-zinc-700/50 backdrop-blur-sm"
+                >
+                  Cancel
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(185, 28, 28, 0.3);
+          border-radius: 2px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(185, 28, 28, 0.5);
+        }
+      `}</style>
     </div>
   );
 }

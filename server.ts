@@ -440,7 +440,16 @@ app.post('/api/movies', verifyAdminToken, async (req, res) => {
       : typeof payload.episodeUrls === 'string'
       ? String(payload.episodeUrls).split('\n').map((url: string) => url.trim()).filter(Boolean)
       : [],
-    }
+    rating: Number(payload.rating) || 4.7,
+    releaseYear: Number(payload.releaseYear) || 2026,
+    duration: payload.duration || '2h 10m',
+    ageRating: payload.ageRating || 'PG-13',
+    genres: Array.isArray(payload.genres) ? payload.genres : typeof payload.genres === 'string' ? String(payload.genres).split(',').map((g: string) => g.trim()).filter(Boolean) : [],
+    cast: Array.isArray(payload.cast) ? payload.cast : typeof payload.cast === 'string' ? String(payload.cast).split(',').map((c: string) => c.trim()).filter(Boolean) : [],
+    isTrending: Boolean(payload.isTrending),
+    isPopular: Boolean(payload.isPopular),
+    muxPlaybackId,
+  };
   movieStore.set(movie.id, movie);
 
   if (pgPool) {
@@ -459,9 +468,46 @@ app.post('/api/movies', verifyAdminToken, async (req, res) => {
 });
 
 app.put('/api/movies/:id', verifyAdminToken, async (req, res) => {
-
   const movieId = req.params.id;
-  const existing = movieStore.get(movieId);
+  let existing: MovieRecord | null = null;
+
+  if (pgPool) {
+    try {
+      const result = await pgPool.query('SELECT * FROM movies WHERE id = $1', [movieId]);
+      if (result.rows.length > 0) {
+        const row = result.rows[0];
+        existing = {
+          id: row.id,
+          title: row.title,
+          synopsis: row.synopsis || '',
+          backdropUrl: row.backdrop_url || '',
+          posterUrl: row.poster_url || '',
+          videoUrl: row.video_url || '',
+          trailerUrl: row.trailer_url || '',
+          category: row.category || 'New Releases',
+          mediaType: row.media_type || 'Movie',
+          seriesCount: Number(row.series_count || 0),
+          rating: Number(row.rating || 4.7),
+          releaseYear: Number(row.release_year || 2026),
+          duration: row.duration || '2h 10m',
+          ageRating: row.age_rating || 'PG-13',
+          genres: row.genres || [],
+          cast: row.cast || [],
+          isTrending: Boolean(row.is_trending),
+          isPopular: Boolean(row.is_popular),
+          muxPlaybackId: row.mux_playback_id || '',
+          episodeUrls: row.episode_urls || [],
+        };
+      }
+    } catch (error: any) {
+      console.error('Postgres movie lookup error:', error.message);
+    }
+  }
+
+  if (!existing) {
+    existing = movieStore.get(movieId) || null;
+  }
+
   if (!existing) return res.status(404).json({ error: 'Movie not found' });
 
   const payload = req.body || {};
@@ -487,8 +533,9 @@ app.put('/api/movies/:id', verifyAdminToken, async (req, res) => {
     ageRating: payload.ageRating || existing.ageRating,
     genres: Array.isArray(payload.genres) ? payload.genres : existing.genres,
     cast: Array.isArray(payload.cast) ? payload.cast : existing.cast,
-    isTrending: Boolean(payload.isTrending),
-    isPopular: Boolean(payload.isPopular),
+    isTrending: payload.isTrending !== undefined ? Boolean(payload.isTrending) : Boolean(existing.isTrending),
+    isPopular: payload.isPopular !== undefined ? Boolean(payload.isPopular) : Boolean(existing.isPopular),
+    muxPlaybackId: payload.muxPlaybackId || existing.muxPlaybackId || '',
   };
 
   movieStore.set(movieId, updated);
@@ -509,16 +556,24 @@ app.put('/api/movies/:id', verifyAdminToken, async (req, res) => {
 
 app.delete('/api/movies/:id', verifyAdminToken, async (req, res) => {
   const movieId = req.params.id;
-  const exists = movieStore.has(movieId);
-  if (!exists) return res.status(404).json({ error: 'Movie not found' });
-  movieStore.delete(movieId);
+  let deleted = false;
 
   if (pgPool) {
     try {
-      await pgPool.query('DELETE FROM movies WHERE id = $1', [movieId]);
+      const result = await pgPool.query('DELETE FROM movies WHERE id = $1 RETURNING id', [movieId]);
+      deleted = Boolean(result?.rowCount && result.rowCount > 0);
     } catch (error: any) {
       console.error('Postgres movie delete error:', error.message);
     }
+  }
+
+  if (movieStore.has(movieId)) {
+    movieStore.delete(movieId);
+    deleted = true;
+  }
+
+  if (!deleted) {
+    return res.status(404).json({ error: 'Movie not found' });
   }
 
   return res.json({ success: true });
@@ -840,7 +895,7 @@ app.post('/api/admin/register', async (req, res) => {
       return res.status(500).json({ error: 'Unable to create admin' });
     }
   } else {
-    adminStore.set(normalized, { email: normalized, passwordHash, name });
+    adminStore.set(normalized, { adminId: normalized, email: normalized, passwordHash, name });
   }
 
   return res.json({ success: true, message: 'Admin registered' });
