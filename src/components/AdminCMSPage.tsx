@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Film, Loader2, PlusCircle, Trash2, PencilLine, Users, Crown, Database, LogOut, Shield, TrendingUp, Star, Clock, Calendar } from 'lucide-react';
+import { Film, Loader2, PlusCircle, Trash2, PencilLine, Users, Crown, Database, LogOut, Shield, TrendingUp, Star, Clock, Calendar, Upload, Image, Video, FileVideo, BarChart3, Activity, Zap, Eye, Edit3, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { Movie } from '../types';
-import { fetchAdminStats } from '../lib/api';
+import { fetchAdminStats, uploadFiles } from '../lib/api';
+import { motion } from 'motion/react';
 
 interface MovieFormState {
   title: string;
@@ -19,6 +20,8 @@ interface MovieFormState {
   cast: string;
   isTrending: boolean;
   isPopular: boolean;
+  mediaType: string;
+  seriesCount: string;
 }
 
 const emptyForm: MovieFormState = {
@@ -37,6 +40,8 @@ const emptyForm: MovieFormState = {
   cast: '',
   isTrending: false,
   isPopular: false,
+  mediaType: 'Movie',
+  seriesCount: '0',
 };
 
 export default function AdminCMSPage() {
@@ -47,7 +52,9 @@ export default function AdminCMSPage() {
   }
 
   const [movies, setMovies] = useState<Movie[]>([]);
-  const [stats, setStats] = useState<{ movies: number; users: number; subscriptions: number }>({ movies: 0, users: 0, subscriptions: 0 });
+  const [stats, setStats] = useState<{ movies: number; users: number; subscriptions: number; revenue: number }>({ movies: 0, users: 0, subscriptions: 0, revenue: 0 });
+  const [users, setUsers] = useState<any[]>([]);
+  const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [form, setForm] = useState<MovieFormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,6 +62,9 @@ export default function AdminCMSPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'movies' | 'analytics' | 'users'>('movies');
 
   const loadMovies = async () => {
     setLoading(true);
@@ -75,11 +85,51 @@ export default function AdminCMSPage() {
     if (adminToken) {
       setStatsLoading(true);
       fetchAdminStats(adminToken)
-        .then((data) => setStats(data.stats || { movies: 0, users: 0, subscriptions: 0 }))
-        .catch(() => setStats({ movies: 0, users: 0, subscriptions: 0 }))
+        .then((data) => setStats(data.stats || { movies: 0, users: 0, subscriptions: 0, revenue: 0 }))
+        .catch(() => setStats({ movies: 0, users: 0, subscriptions: 0, revenue: 0 }))
         .finally(() => setStatsLoading(false));
+
+      // Load users and subscriptions
+      Promise.all([
+        fetch('/api/admin/users', { headers: { Authorization: `Bearer ${adminToken}` } }),
+        fetch('/api/admin/subscriptions', { headers: { Authorization: `Bearer ${adminToken}` } })
+      ])
+        .then(async ([usersRes, subsRes]) => {
+          try {
+            let usersData = { success: false };
+            let subsData = { success: false };
+            
+            if (usersRes.ok) {
+              try {
+                const text = await usersRes.text();
+                if (text.trim().startsWith('{')) {
+                  usersData = JSON.parse(text);
+                }
+              } catch (e) {
+                console.warn('Failed to parse users response:', e);
+              }
+            }
+            
+            if (subsRes.ok) {
+              try {
+                const text = await subsRes.text();
+                if (text.trim().startsWith('{')) {
+                  subsData = JSON.parse(text);
+                }
+              } catch (e) {
+                console.warn('Failed to parse subscriptions response:', e);
+              }
+            }
+            
+            if (usersData.success) setUsers(usersData.users || []);
+            if (subsData.success) setSubscriptions(subsData.subscriptions || []);
+          } catch (parseError) {
+            console.error('Failed to parse admin data:', parseError);
+          }
+        })
+        .catch(err => console.error('Failed to load admin data:', err));
     }
-  }, []);
+  }, [adminToken]);
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -121,6 +171,8 @@ export default function AdminCMSPage() {
         cast: form.cast.split(',').map((item) => item.trim()).filter(Boolean),
         isTrending: form.isTrending,
         isPopular: form.isPopular,
+        mediaType: form.mediaType,
+        seriesCount: Number(form.seriesCount),
       };
 
       const response = await fetch(editingId ? `/api/movies/${editingId}` : '/api/movies', {
@@ -161,6 +213,38 @@ export default function AdminCMSPage() {
     loadMovies();
   };
 
+  const handleFileUpload = async (files: FileList, field: 'poster' | 'backdrop' | 'video' | 'trailer') => {
+    if (!files.length) return;
+    
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    try {
+      // Simulate progress for Cloudinary upload
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => Math.min(prev + 10, 90));
+      }, 200);
+
+      const response = await uploadFiles(files, adminToken);
+      
+      clearInterval(progressInterval);
+      setUploadProgress(100);
+
+      if (response.success && response.uploadedUrls) {
+        const url = response.uploadedUrls[field];
+        if (url) {
+          setForm(prev => ({ ...prev, [`${field}Url`]: url }));
+          setSuccess(`${field.charAt(0).toUpperCase() + field.slice(1)} uploaded successfully to Cloudinary!`);
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'Upload failed');
+    } finally {
+      setIsUploading(false);
+      setTimeout(() => setUploadProgress(0), 500);
+    }
+  };
+
   const handleEdit = (movie: Movie) => {
     setEditingId(movie.id);
     setForm({
@@ -179,6 +263,8 @@ export default function AdminCMSPage() {
       cast: movie.cast.join(', '),
       isTrending: Boolean(movie.isTrending),
       isPopular: Boolean(movie.isPopular),
+      mediaType: movie.mediaType || 'Movie',
+      seriesCount: String(movie.seriesCount || 0),
     });
   };
 
@@ -196,7 +282,7 @@ export default function AdminCMSPage() {
       <div className="mx-auto flex max-w-7xl flex-col gap-6 relative z-10">
         {/* Header Card */}
         <div className="rounded-3xl bg-linear-to-br from-zinc-900/90 via-black/90 to-red-950/20 backdrop-blur-xl border border-red-900/20 shadow-2xl shadow-red-900/5 p-8">
-          <div className="mb-6 grid gap-4 md:grid-cols-3">
+          <div className="mb-6 grid gap-4 md:grid-cols-4">
             <div className="rounded-2xl bg-linear-to-br from-zinc-950/80 to-black/80 border border-red-900/20 p-5 backdrop-blur-sm hover:border-red-800/40 transition-all duration-300 group">
               <div className="mb-3 flex items-center gap-3">
                 <div className="p-2 rounded-xl bg-linear-to-br from-red-600/20 to-red-900/20 border border-red-800/30 group-hover:from-red-600/30 group-hover:to-red-900/30 transition-all">
@@ -224,6 +310,15 @@ export default function AdminCMSPage() {
               </div>
               <div className="text-3xl font-black bg-linear-to-r from-amber-400 to-amber-600 bg-clip-text text-transparent">{stats.subscriptions}</div>
             </div>
+            <div className="rounded-2xl bg-linear-to-br from-zinc-950/80 to-black/80 border border-emerald-900/20 p-5 backdrop-blur-sm hover:border-emerald-800/40 transition-all duration-300 group">
+              <div className="mb-3 flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-linear-to-br from-emerald-600/20 to-emerald-900/20 border border-emerald-800/30 group-hover:from-emerald-600/30 group-hover:to-emerald-900/30 transition-all">
+                  <Activity className="h-5 w-5 text-emerald-400" />
+                </div>
+                <span className="text-xs uppercase tracking-[0.2em] text-zinc-500 font-semibold">Revenue</span>
+              </div>
+              <div className="text-3xl font-black bg-linear-to-r from-emerald-400 to-emerald-600 bg-clip-text text-transparent">${(stats.revenue || 0).toFixed(2)}</div>
+            </div>
           </div>
 
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -238,6 +333,24 @@ export default function AdminCMSPage() {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <div className="flex rounded-2xl bg-zinc-950/80 border border-zinc-800/50 p-1.5 backdrop-blur-sm">
+                {['movies', 'analytics', 'users'].map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab as any)}
+                    className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-300 flex items-center gap-2 ${
+                      activeTab === tab
+                        ? 'bg-gradient-to-r from-red-600 to-red-700 text-white shadow-lg shadow-red-900/20'
+                        : 'text-zinc-400 hover:text-zinc-300'
+                    }`}
+                  >
+                    {tab === 'movies' && <Film className="h-4 w-4" />}
+                    {tab === 'analytics' && <BarChart3 className="h-4 w-4" />}
+                    {tab === 'users' && <Users className="h-4 w-4" />}
+                    {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
               <button 
                 onClick={resetForm} 
                 className="px-5 py-2.5 rounded-xl bg-linear-to-r from-red-600/20 to-red-900/20 border border-red-800/30 text-sm font-semibold text-red-300 hover:from-red-600/30 hover:to-red-900/30 hover:border-red-700/50 transition-all duration-300 flex items-center gap-2"
@@ -257,9 +370,10 @@ export default function AdminCMSPage() {
         </div>
 
         {/* Main Content Grid */}
-        <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-          {/* Form Section */}
-          <div className="rounded-3xl bg-linear-to-br from-zinc-900/90 via-black/90 to-red-950/20 backdrop-blur-xl border border-red-900/20 shadow-2xl shadow-red-900/5 p-8">
+        {activeTab === 'movies' ? (
+          <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+            {/* Form Section */}
+            <div className="rounded-3xl bg-linear-to-br from-zinc-900/90 via-black/90 to-red-950/20 backdrop-blur-xl border border-red-900/20 shadow-2xl shadow-red-900/5 p-8">
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-3">
                 {editingId ? (
@@ -376,14 +490,39 @@ export default function AdminCMSPage() {
                   />
                 </div>
                 <div className="group">
-                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Genres</label>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Media Type</label>
+                  <select 
+                    value={form.mediaType}
+                    onChange={(e) => setForm({ ...form, mediaType: e.target.value })}
+                    className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm"
+                  >
+                    <option value="Movie">Movie</option>
+                    <option value="TV Series">TV Series</option>
+                  </select>
+                </div>
+              </div>
+
+              {form.mediaType === 'TV Series' && (
+                <div className="group">
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Series Count (Episodes)</label>
                   <input 
-                    value={form.genres} 
-                    onChange={(e) => setForm({ ...form, genres: e.target.value })} 
-                    className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
-                    placeholder="Action, Drama, Sci-Fi" 
+                    type="number"
+                    value={form.seriesCount} 
+                    onChange={(e) => setForm({ ...form, seriesCount: e.target.value })} 
+                    className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
+                    placeholder="Number of episodes"
                   />
                 </div>
+              )}
+
+              <div className="group">
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Genres</label>
+                <input 
+                  value={form.genres} 
+                  onChange={(e) => setForm({ ...form, genres: e.target.value })} 
+                  className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
+                  placeholder="Action, Drama, Sci-Fi" 
+                />
               </div>
 
               <div className="grid gap-5 md:grid-cols-2">
@@ -398,42 +537,110 @@ export default function AdminCMSPage() {
                 </div>
                 <div className="group">
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Video URL</label>
-                  <input 
-                    value={form.videoUrl} 
-                    onChange={(e) => setForm({ ...form, videoUrl: e.target.value })} 
-                    className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
-                  />
+                  <div className="flex gap-2">
+                    <input 
+                      value={form.videoUrl} 
+                      onChange={(e) => setForm({ ...form, videoUrl: e.target.value })} 
+                      className="flex-1 rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
+                    />
+                    <label className="relative cursor-pointer">
+                      <input
+                        type="file"
+                        accept="video/*"
+                        className="hidden"
+                        onChange={(e) => handleFileUpload(e.target.files, 'video')}
+                      />
+                      <div className="px-4 py-3.5 rounded-xl bg-gradient-to-r from-red-600/20 to-red-900/20 border border-red-800/30 text-red-300 hover:from-red-600/30 hover:to-red-900/30 transition-all duration-300 flex items-center gap-2">
+                        <Video className="h-4 w-4" />
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
 
               <div className="grid gap-5 md:grid-cols-2">
                 <div className="group">
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Poster URL</label>
-                  <input 
-                    value={form.posterUrl} 
-                    onChange={(e) => setForm({ ...form, posterUrl: e.target.value })} 
-                    className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
-                  />
+                  <div className="flex gap-2">
+                    <input 
+                      value={form.posterUrl} 
+                      onChange={(e) => setForm({ ...form, posterUrl: e.target.value })} 
+                      className="flex-1 rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
+                    />
+                    <label className="relative cursor-pointer">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleFileUpload(e.target.files, 'poster')}
+                      />
+                      <div className="px-4 py-3.5 rounded-xl bg-gradient-to-r from-red-600/20 to-red-900/20 border border-red-800/30 text-red-300 hover:from-red-600/30 hover:to-red-900/30 transition-all duration-300 flex items-center gap-2">
+                        <Upload className="h-4 w-4" />
+                      </div>
+                    </label>
+                  </div>
                 </div>
                 <div className="group">
                   <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Backdrop URL</label>
-                  <input 
-                    value={form.backdropUrl} 
-                    onChange={(e) => setForm({ ...form, backdropUrl: e.target.value })} 
-                    className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
-                  />
+                  <div className="flex gap-2">
+                    <input 
+                      value={form.backdropUrl} 
+                      onChange={(e) => setForm({ ...form, backdropUrl: e.target.value })} 
+                      className="flex-1 rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
+                    />
+                    <label className="relative cursor-pointer">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleFileUpload(e.target.files, 'backdrop')}
+                      />
+                      <div className="px-4 py-3.5 rounded-xl bg-gradient-to-r from-red-600/20 to-red-900/20 border border-red-800/30 text-red-300 hover:from-red-600/30 hover:to-red-900/30 transition-all duration-300 flex items-center gap-2">
+                        <Image className="h-4 w-4" />
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
 
               <div className="group">
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.24em] text-zinc-400">Trailer URL</label>
-                <input 
-                  value={form.trailerUrl} 
-                  onChange={(e) => setForm({ ...form, trailerUrl: e.target.value })} 
-                  className="w-full rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
-                  placeholder="https://..." 
-                />
+                <div className="flex gap-2">
+                  <input 
+                    value={form.trailerUrl} 
+                    onChange={(e) => setForm({ ...form, trailerUrl: e.target.value })} 
+                    className="flex-1 rounded-xl bg-zinc-950/80 border border-zinc-700/50 text-white px-4 py-3.5 text-sm placeholder-zinc-500 focus:outline-none focus:border-red-600/70 focus:ring-2 focus:ring-red-600/20 transition-all duration-300 backdrop-blur-sm" 
+                    placeholder="https://..." 
+                  />
+                  <label className="relative cursor-pointer">
+                    <input
+                      type="file"
+                      accept="video/*"
+                      className="hidden"
+                      onChange={(e) => handleFileUpload(e.target.files, 'trailer')}
+                    />
+                    <div className="px-4 py-3.5 rounded-xl bg-gradient-to-r from-red-600/20 to-red-900/20 border border-red-800/30 text-red-300 hover:from-red-600/30 hover:to-red-900/30 transition-all duration-300 flex items-center gap-2">
+                      <FileVideo className="h-4 w-4" />
+                    </div>
+                  </label>
+                </div>
               </div>
+
+              {/* Upload Progress */}
+              {isUploading && (
+                <div className="rounded-xl bg-zinc-950/50 border border-zinc-800/50 p-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-red-400" />
+                    <span className="text-sm text-zinc-300">Uploading file... {uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-zinc-800 rounded-full h-2">
+                    <div 
+                      className="bg-gradient-to-r from-red-600 to-red-700 h-2 rounded-full transition-all duration-300" 
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-6 p-4 rounded-xl bg-zinc-950/50 border border-zinc-800/50">
                 <label className="flex items-center gap-3 text-sm text-zinc-300 cursor-pointer group">
@@ -581,6 +788,85 @@ export default function AdminCMSPage() {
             </div>
           </div>
         </div>
+        ) : activeTab === 'analytics' ? (
+          <div className="rounded-3xl bg-linear-to-br from-zinc-900/90 via-black/90 to-red-950/20 backdrop-blur-xl border border-red-900/20 shadow-2xl shadow-red-900/5 p-8">
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-3">
+                <BarChart3 className="h-6 w-6 text-red-400" />
+                Analytics Dashboard
+              </h2>
+              <p className="text-sm text-zinc-400">Track platform performance and user engagement metrics.</p>
+            </div>
+            <div className="grid gap-6 md:grid-cols-2">
+              <div className="rounded-2xl bg-zinc-950/50 border border-zinc-800/50 p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-xl bg-gradient-to-br from-red-600/20 to-red-900/20 border border-red-800/30">
+                    <Zap className="h-5 w-5 text-red-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-zinc-500 font-semibold">Total Revenue</p>
+                    <p className="text-2xl font-black text-white">${stats.revenue.toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl bg-zinc-950/50 border border-zinc-800/50 p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-xl bg-gradient-to-br from-emerald-600/20 to-emerald-900/20 border border-emerald-800/30">
+                    <Crown className="h-5 w-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-zinc-500 font-semibold">Active Subscriptions</p>
+                    <p className="text-2xl font-black text-white">{stats.subscriptions}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === 'users' ? (
+          <div className="rounded-3xl bg-linear-to-br from-zinc-900/90 via-black/90 to-red-950/20 backdrop-blur-xl border border-red-900/20 shadow-2xl shadow-red-900/5 p-8">
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-3">
+                <Users className="h-6 w-6 text-red-400" />
+                User Management
+              </h2>
+              <p className="text-sm text-zinc-400">View and manage registered users and their subscriptions.</p>
+            </div>
+            <div className="overflow-x-auto rounded-3xl border border-red-900/30 bg-[#060606]/90">
+              <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
+                <thead className="bg-[#080808] text-zinc-400 uppercase tracking-[0.18em] text-[11px]">
+                  <tr>
+                    <th className="sticky top-0 border-b border-zinc-800 px-4 py-4">User</th>
+                    <th className="sticky top-0 border-b border-zinc-800 px-4 py-4">Email</th>
+                    <th className="sticky top-0 border-b border-zinc-800 px-4 py-4">Status</th>
+                    <th className="sticky top-0 border-b border-zinc-800 px-4 py-4">Joined</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800">
+                  {users.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-12 text-center text-zinc-500">
+                        No users registered yet.
+                      </td>
+                    </tr>
+                  ) : users.map((user, index) => (
+                    <tr key={user.id} className={index % 2 === 0 ? 'bg-[#090909]' : 'bg-[#060606]'}>
+                      <td className="px-4 py-4 align-top text-white">{user.displayName}</td>
+                      <td className="px-4 py-4 align-top text-zinc-300">{user.email}</td>
+                      <td className="px-4 py-4 align-top">
+                        <div className="inline-flex items-center gap-2 rounded-full border border-emerald-800/40 bg-emerald-950/50 px-3 py-1 text-[11px] uppercase text-emerald-300 tracking-[0.18em]">
+                          Active
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 align-top text-zinc-300">
+                        {new Date(user.createdAt).toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <style>{`

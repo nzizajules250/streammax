@@ -31,7 +31,17 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
     setSuccess('');
 
     try {
-      const res = await sendVerificationCode(email);
+      const res = await sendVerificationCode(email, mode);
+      
+      if (res.requiresRegistration) {
+        setError(res.error || 'No account found with this email.');
+        // Auto-switch to signup mode
+        setMode('signup');
+        setStep('form');
+        setIsLoading(false);
+        return;
+      }
+      
       if (res.debugCode) {
         setSuccess(`${res.message} Code: ${res.debugCode}`);
       } else {
@@ -39,7 +49,13 @@ export default function AuthPage({ onClose, onLoginSuccess }: AuthPageProps) {
       }
       setStep('verify');
     } catch (err: any) {
-      setError(err.message || 'Unable to send verification code.');
+      if (err.message?.includes('No account found') || err.message?.includes('sign up first')) {
+        setError(err.message);
+        setMode('signup');
+        setStep('form');
+      } else {
+        setError(err.message || 'Unable to send verification code.');
+      }
     } finally {
       setIsLoading(false);
     }

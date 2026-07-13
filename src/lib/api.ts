@@ -28,10 +28,10 @@ export async function adminLogin(email: string, password: string) {
   });
 }
 
-export async function sendVerificationCode(email: string) {
-  return request<{ success: boolean; message: string; debugCode?: string }>('/api/auth/send-code', {
+export async function sendVerificationCode(email: string, mode?: 'login' | 'signup') {
+  return request<{ success: boolean; message: string; debugCode?: string; requiresRegistration?: boolean }>('/api/auth/send-code', {
     method: 'POST',
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, mode }),
   });
 }
 
@@ -68,7 +68,7 @@ export async function fetchSubscriptionStatus(token?: string) {
 }
 
 export async function fetchAdminStats(adminToken: string) {
-  return request<{ success: boolean; stats: { movies: number; users: number; subscriptions: number } }>('/api/admin/stats', {
+  return request<{ success: boolean; stats: { movies: number; users: number; subscriptions: number; revenue: number } }>('/api/admin/stats', {
     method: 'GET',
     headers: { Authorization: `Bearer ${adminToken}` },
   });
@@ -97,3 +97,26 @@ export async function deleteMovie(movieId: string, adminToken: string) {
   });
 }
 
+export async function uploadFiles(files: FileList, adminToken: string) {
+  const formData = new FormData();
+  const fieldNames = ['poster', 'backdrop', 'video', 'trailer'];
+  
+  for (let i = 0; i < files.length && i < fieldNames.length; i++) {
+    formData.append(fieldNames[i], files[i]);
+  }
+
+  const response = await fetch('/api/admin/upload', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'Upload failed');
+  }
+
+  return response.json() as Promise<{ success: boolean; uploadedUrls: Record<string, string> }>;
+}

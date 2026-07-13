@@ -8,6 +8,8 @@ import bcrypt from 'bcryptjs';
 import pkg from 'pg';
 import Mux from '@mux/mux-node';
 import { Resend } from 'resend';
+import multer from 'multer';
+import { v2 as cloudinary } from 'cloudinary';
 
 // Load environment variables
 dotenv.config();
@@ -17,10 +19,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __cwd = process.cwd();
 
 const { Pool } = pkg;
-const pgPool = process.env.DATABASE_URL || process.env.POSTGRES_URL ? new Pool({ connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL }) : null;
+const pgPool = process.env.DATABASE_URL || process.env.POSTGRES_URL ? new Pool({ 
+  connectionString: process.env.DATABASE_URL || process.env.POSTGRES_URL,
+  ssl: { rejectUnauthorized: false }
+}) : null;
 const mux = process.env.MUX_TOKEN_ID && process.env.MUX_TOKEN_SECRET ? new Mux({ tokenId: process.env.MUX_TOKEN_ID, tokenSecret: process.env.MUX_TOKEN_SECRET }) : null;
 const resendApiKey = process.env.RESEND_API_KEY || 're_W7eRvHRf_Gzf3NpJdZGcRnTFFw5b9RbMi';
 const resend = new Resend(resendApiKey);
+
+// Configure Cloudinary
+if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret';
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'dev_admin_jwt_secret';
@@ -67,6 +81,39 @@ const verifyAdminToken = (req: AuthenticatedRequest, res: Response, next: NextFu
 
 const app = express();
 app.use(express.json());
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__cwd, 'uploads');
+    if (!require('fs').existsSync(uploadDir)) {
+      require('fs').mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 500 * 1024 * 1024, // 500MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|mp4|mov|avi|mkv|webm/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only images and videos are allowed.'));
+    }
+  }
+});
 
 const PORT = 3000;
 
@@ -291,12 +338,41 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.post('/api/auth/send-code', async (req, res) => {
-  const { email } = req.body || {};
+  const { email, mode } = req.body || {};
   if (!email || typeof email !== 'string') {
     return res.status(400).json({ error: 'A valid email is required.' });
   }
 
   const normalizedEmail = email.toLowerCase().trim();
+  
+  // Check if user exists for login mode
+  if (mode === 'login') {
+    let userExists = false;
+    if (pgPool) {
+      try {
+        const result = await pgPool.query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+        userExists = result.rows.length > 0;
+      } catch (err) {
+        console.error('User lookup error:', getErrorMessage(err));
+      }
+    } else {
+      // Check in-memory store
+      for (const [uid, user] of userStore.entries()) {
+        if (user.email === normalizedEmail) {
+          userExists = true;
+          break;
+        }
+      }
+    }
+    
+    if (!userExists) {
+      return res.status(404).json({ 
+        error: 'No account found with this email. Please sign up first.',
+        requiresRegistration: true 
+      });
+    }
+  }
+
   const code = generateCode();
   verificationStore.set(normalizedEmail, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
 
@@ -410,6 +486,66 @@ app.get('/api/movies', async (req, res) => {
   const movies = Array.from(movieStore.values());
   return res.json({ success: true, movies });
 });
+
+// File upload endpoint for admin using Cloudinary (video only)
+app.post('/api/admin/upload', verifyAdminToken, upload.fields([
+  { name: 'video', maxCount: 1 },
+  { name: 'trailer', maxCount: 1 }
+]), async (req: any, res) => {
+  try {
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    const uploadedUrls: { [key: string]: string } = {};
+
+    if (files) {
+      for (const [fieldname, fileArray] of Object.entries(files)) {
+        if (fileArray && fileArray.length > 0) {
+          const file = fileArray[0];
+          
+          // Only upload videos to Cloudinary if properly configured
+          const isCloudinaryConfigured = 
+            process.env.CLOUDINARY_CLOUD_NAME && 
+            process.env.CLOUDINARY_CLOUD_NAME !== 'your_cloud_name' &&
+            process.env.CLOUDINARY_API_KEY && 
+            process.env.CLOUDINARY_API_KEY !== 'your_api_key' &&
+            process.env.CLOUDINARY_API_SECRET && 
+            process.env.CLOUDINARY_API_SECRET !== 'your_api_secret';
+
+          if (isCloudinaryConfigured) {
+            try {
+              const result = await cloudinary.uploader.upload(file.path, {
+                resource_type: 'video',
+                folder: 'streammax',
+              });
+              uploadedUrls[fieldname] = result.secure_url;
+              
+              // Delete local file after successful upload
+              try {
+                require('fs').unlinkSync(file.path);
+              } catch (err) {
+                console.error('Error deleting local file:', err);
+              }
+            } catch (cloudinaryError: any) {
+              console.error('Cloudinary upload error:', cloudinaryError.message);
+              // Fallback to local storage on Cloudinary error
+              uploadedUrls[fieldname] = `/uploads/${file.filename}`;
+            }
+          } else {
+            // Use local storage if Cloudinary is not configured
+            uploadedUrls[fieldname] = `/uploads/${file.filename}`;
+          }
+        }
+      }
+    }
+
+    return res.json({ success: true, uploadedUrls });
+  } catch (error: any) {
+    console.error('File upload error:', error.message);
+    return res.status(500).json({ error: error.message || 'File upload failed' });
+  }
+});
+
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__cwd, 'uploads')));
 
 app.post('/api/movies', verifyAdminToken, async (req, res) => {
   const payload = req.body || {};
@@ -648,7 +784,7 @@ app.get('/api/subscriptions/me', async (req: AuthenticatedRequest, res) => {
 app.get('/api/admin/stats', verifyAdminToken, async (req, res) => {
   try {
     if (!pgPool) {
-      return res.json({ success: true, stats: { movies: movieStore.size, users: userStore.size, subscriptions: 0 } });
+      return res.json({ success: true, stats: { movies: movieStore.size, users: userStore.size, subscriptions: 0, revenue: 0 } });
     }
 
     const [moviesResult, usersResult, subscriptionsResult] = await Promise.all([
@@ -657,14 +793,72 @@ app.get('/api/admin/stats', verifyAdminToken, async (req, res) => {
       pgPool.query('SELECT COUNT(*)::int AS count FROM subscriptions WHERE is_premium = TRUE'),
     ]);
 
+    const revenue = Number(subscriptionsResult.rows[0]?.count || 0) * 9.99;
+
     return res.json({
       success: true,
       stats: {
         movies: Number(moviesResult.rows[0]?.count || 0),
         users: Number(usersResult.rows[0]?.count || 0),
         subscriptions: Number(subscriptionsResult.rows[0]?.count || 0),
+        revenue: revenue,
       },
     });
+  } catch (error) {
+    return res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get('/api/admin/users', verifyAdminToken, async (req, res) => {
+  try {
+    if (!pgPool) {
+      const users = Array.from(userStore.values()).map(u => ({
+        id: u.uid,
+        email: u.email,
+        displayName: u.displayName,
+        createdAt: Date.now(),
+      }));
+      return res.json({ success: true, users });
+    }
+
+    const result = await pgPool.query('SELECT id, email, full_name, created_at FROM users ORDER BY created_at DESC LIMIT 50');
+    const users = result.rows.map(row => ({
+      id: `u_${row.id}`,
+      email: row.email,
+      displayName: row.full_name || row.email.split('@')[0],
+      createdAt: new Date(row.created_at).getTime(),
+    }));
+
+    return res.json({ success: true, users });
+  } catch (error) {
+    return res.status(500).json({ error: getErrorMessage(error) });
+  }
+});
+
+app.get('/api/admin/subscriptions', verifyAdminToken, async (req, res) => {
+  try {
+    if (!pgPool) {
+      const subs = Array.from(subscriptionStore.entries()).map(([uid, sub]) => ({
+        userId: uid,
+        isPremium: sub.isPremium,
+        subscribedAt: sub.subscribedAt,
+        expiresAt: sub.expiresAt,
+        transactionId: sub.transactionId,
+      }));
+      return res.json({ success: true, subscriptions: subs });
+    }
+
+    const result = await pgPool.query('SELECT user_id, is_premium, tx_ref, transaction_id, subscribed_at, expires_at FROM subscriptions WHERE is_premium = TRUE ORDER BY subscribed_at DESC LIMIT 50');
+    const subscriptions = result.rows.map(row => ({
+      userId: row.user_id,
+      isPremium: row.is_premium,
+      txRef: row.tx_ref,
+      transactionId: row.transaction_id,
+      subscribedAt: new Date(row.subscribed_at).getTime(),
+      expiresAt: new Date(row.expires_at).getTime(),
+    }));
+
+    return res.json({ success: true, subscriptions });
   } catch (error) {
     return res.status(500).json({ error: getErrorMessage(error) });
   }
@@ -772,16 +966,59 @@ app.get('/api/payments/callback', async (req, res) => {
   const { status, tx_ref, transaction_id } = req.query;
 
   if (status === 'successful' || status === 'completed') {
+    const flutterwaveSecret = process.env.FLUTTERWAVE_SECRET_KEY;
+    const txId = String(transaction_id || '');
+
+    // Verify transaction with Flutterwave API if secret key is available
+    if (flutterwaveSecret && txId) {
+      try {
+        const verifyResponse = await fetch(`https://api.flutterwave.com/v3/transactions/${txId}/verify`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${flutterwaveSecret}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (verifyResponse.ok) {
+          const verifyData = await verifyResponse.json();
+          
+          // Check if transaction is actually successful
+          if (verifyData?.data?.status !== 'successful' && verifyData?.data?.status !== 'completed') {
+            console.error('Flutterwave verification failed: Transaction not successful', verifyData);
+            return res.redirect('/?payment=failed');
+          }
+
+          // Verify the amount matches expected amount
+          if (verifyData?.data?.amount !== 9.99) {
+            console.error('Flutterwave verification failed: Amount mismatch', verifyData);
+            return res.redirect('/?payment=failed');
+          }
+
+          // Verify the currency
+          if (verifyData?.data?.currency !== 'USD') {
+            console.error('Flutterwave verification failed: Currency mismatch', verifyData);
+            return res.redirect('/?payment=failed');
+          }
+        } else {
+          console.error('Flutterwave verification API error:', verifyResponse.status);
+          return res.redirect('/?payment=failed');
+        }
+      } catch (err: any) {
+        console.error('Flutterwave verification error:', err.message);
+        return res.redirect('/?payment=failed');
+      }
+    }
+
     // Parse UID from tx_ref (sub_uid_profileId_timestamp)
     const parts = (tx_ref as string || '').split('_');
     if (parts.length >= 3) {
       const uid = parts[1];
-      const txId = String(transaction_id || 'simulated');
       const subscriptionRecord = {
         uid,
         isPremium: true,
         txRef: String(tx_ref || ''),
-        transactionId: txId,
+        transactionId: txId || 'simulated',
         subscribedAt: Date.now(),
         expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
       };
