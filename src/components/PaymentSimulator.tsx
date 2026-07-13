@@ -186,7 +186,7 @@ export default function PaymentSimulator() {
             ) : (
               <div className="space-y-6">
                 {/* Sandbox Notice */}
-                <div className="p-4 rounded-xl bg-gradient-to-r from-amber-950/30 to-amber-900/20 border border-amber-800/30 backdrop-blur-sm">
+                <div className="p-4 rounded-xl bg-linear-to-r from-amber-950/30 to-amber-900/20 border border-amber-800/30 backdrop-blur-sm">
                   <div className="flex items-center gap-2 mb-2">
                     <Sparkles className="w-4 h-4 text-amber-400" />
                     <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Sandbox Mode</span>

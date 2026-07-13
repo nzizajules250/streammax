@@ -25,7 +25,6 @@ const resend = new Resend(resendApiKey);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret';
 const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET || 'dev_admin_jwt_secret';
 
-// In-memory stores as fallback when Postgres is not configured
 const userStore = new Map<string, any>();
 
 interface AdminRecord {

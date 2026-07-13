@@ -1159,7 +1159,7 @@ export default function App() {
           <div className="space-y-4 max-w-md">
             <div className="inline-flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center shadow-lg shadow-red-900/20">
-                <Film className="w-7 h-7 text-white" />
+                <Film className="w-7 h-7 bg-linear-to-br from-red-600 to-red-900" />
               </div>
               <div>
                 <p className="text-lg font-black uppercase tracking-wider text-white">Stream Max</p>
@@ -1230,7 +1230,7 @@ export default function App() {
           animation-delay: 2s;
         }
         .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
+          width: 5px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
           background: transparent;
